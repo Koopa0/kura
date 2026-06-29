@@ -115,7 +115,7 @@ fn resource_keys(path: &str) -> [&str; 2] {
 }
 
 /// Full filename including extension.
-fn filename(path: &str) -> &str {
+pub(crate) fn filename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 

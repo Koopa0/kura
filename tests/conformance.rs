@@ -208,6 +208,58 @@ fn jsonl_output_is_a_pure_contract() {
 }
 
 #[test]
+fn golden_jsonl_output_contract() {
+    // A fixture exercising several rules; the snapshot locks the full finding shape, message text,
+    // field ordering, and (deterministic) fingerprints, so any change to the output contract is seen.
+    let g = build_graph(&[
+        (
+            "Concepts/golang/Go Slice.md",
+            "---\ntitle: \"Go Slice 內部結構\"\naliases:\n  - Slice Header\n---\nbody\n",
+        ),
+        (
+            "Concepts/golang/A.md",
+            "---\ntype: concept\naliases:\n  - Shared\n---\n[[Go Slice 內部結構]] and [[Ghost]]\n",
+        ),
+        (
+            "Concepts/golang/B.md",
+            "---\ntype: concept\naliases:\n  - Shared\nbased_on:\n  - \"[[Missing]]\"\n---\n",
+        ),
+    ]);
+    let mut report = kura::Report {
+        findings: kura::rules::run(&g),
+    };
+    report.sort();
+    insta::assert_snapshot!("jsonl_output", report.to_jsonl().unwrap());
+}
+
+#[test]
+fn golden_coverage_report() {
+    let g = build_graph(&[
+        (
+            "Concepts/golang/Mounted.md",
+            "---\ntype: concept\ndomain: golang\n---\n",
+        ),
+        (
+            "Concepts/golang/Pending.md",
+            "---\ntype: concept\ndomain: golang\n---\n",
+        ),
+        (
+            "Concepts/golang/Orphan.md",
+            "---\ntype: concept\ndomain: golang\n---\n",
+        ),
+        (
+            "Maps/topics/Go MOC.md",
+            "---\ntype: topic-map\ndomain: golang\n---\n[[Mounted]]\n",
+        ),
+        (
+            "Writing/lessons/golang/L1.md",
+            "---\ntype: lesson\ndomain: golang\nbased_on:\n  - \"[[Pending]]\"\n---\n",
+        ),
+    ]);
+    insta::assert_json_snapshot!("coverage_report", kura::coverage::compute(&g));
+}
+
+#[test]
 fn wikilinks_in_code_are_skipped() {
     let body = "text [[Real]]\n```\n[[InCodeBlock]]\n```\ninline `[[InCodeSpan]]`\n";
     let note = Note::from_markdown("n.md", body);

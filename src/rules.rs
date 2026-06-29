@@ -162,9 +162,12 @@ fn collision_alias(graph: &Graph, out: &mut Vec<Finding>) {
 
 fn collision(alias: &str, members: Vec<String>) -> Finding {
     let count = members.len();
+    // INVARIANT: callers filter to len > 1, so first() is always Some.
     let path = members.first().cloned().unwrap_or_default();
     let joined = members.join(", ");
-    let fp = fingerprint("collision.alias", &path, alias);
+    // Key the fingerprint on the alias only, not a member path: a new note joining the collision
+    // (and possibly sorting ahead of the current first member) must not look like a new finding.
+    let fp = fingerprint("collision.alias", "", alias);
     Finding {
         rule_id: "collision.alias".to_owned(),
         severity: Severity::Warn,
@@ -192,11 +195,14 @@ fn collision(alias: &str, members: Vec<String>) -> Finding {
 /// being reported, to stay biased to false-negative.
 fn provenance_unresolved(graph: &Graph, slugs: &HashMap<String, String>, out: &mut Vec<Finding>) {
     for note in &graph.notes {
-        let predecessor: Vec<String> = note.evolution_predecessor.iter().cloned().collect();
+        let predecessor = note
+            .evolution_predecessor
+            .as_ref()
+            .map(std::slice::from_ref);
         let fields: [(&str, &[String]); 4] = [
             ("based_on", &note.based_on),
             ("related", &note.related),
-            ("evolution_predecessor", &predecessor),
+            ("evolution_predecessor", predecessor.unwrap_or_default()),
             ("evolution_successors", &note.evolution_successors),
         ];
         for (field, values) in fields {
@@ -286,8 +292,9 @@ fn map_disk_mismatch(graph: &Graph, out: &mut Vec<Finding>) {
     }
 }
 
-/// Direction A: a study-path entry that points to a lesson not on disk. `Info` under a planned-gap
-/// heading, otherwise `Warn` (a syllabus promising a reader a lesson that does not exist).
+/// Direction A (`map.disk_mismatch`, gate-worthy): a study-path entry that resolves to nothing — a
+/// syllabus promising a reader a note that does not exist. `Info` under a planned-gap heading,
+/// otherwise `Warn`.
 fn syllabus_lists_missing(syllabus: &Note, link: &WikiLink) -> Finding {
     let planned = link.under_gap_heading;
     Finding {
@@ -300,9 +307,12 @@ fn syllabus_lists_missing(syllabus: &Note, link: &WikiLink) -> Finding {
         path: syllabus.path.clone(),
         line: Some(link.line),
         field: None,
-        message: format!("syllabus lists [[{}]] but no lesson resolves", link.target),
-        evidence: "the study-path entry points to a lesson that is not on disk".to_owned(),
-        suggested_action: "create the lesson, fix the entry, or mark it a planned gap".to_owned(),
+        message: format!(
+            "syllabus links [[{}]] but it resolves to nothing",
+            link.target
+        ),
+        evidence: "a study-path entry that resolves to no note on disk".to_owned(),
+        suggested_action: "create the note, fix the entry, or mark it a planned gap".to_owned(),
         source_rule: "vault-schema.toml#rules".to_owned(),
         target: Some(link.target.clone()),
         resolved_to: None,
@@ -311,13 +321,14 @@ fn syllabus_lists_missing(syllabus: &Note, link: &WikiLink) -> Finding {
     }
 }
 
-/// Direction B: a lesson on disk that the syllabus for its domain does not list. `Info` when the
-/// lesson is a draft or a declared curriculum gap (expected work-in-progress), otherwise `Warn`.
+/// Direction B (`map.disk_unlisted`, advisory — never gates, since writing a lesson before adding it
+/// to the syllabus is normal): a lesson on disk that the syllabus for its domain does not list.
+/// `Info` when the lesson is a draft or a declared curriculum gap, otherwise `Warn`.
 fn disk_unlisted(syllabus: &Note, lesson: &Note) -> Finding {
     let expected = lesson.status.as_deref() == Some("draft")
         || lesson.source_kind.as_deref() == Some("curriculum-gap");
     Finding {
-        rule_id: "map.disk_mismatch".to_owned(),
+        rule_id: "map.disk_unlisted".to_owned(),
         severity: if expected {
             Severity::Info
         } else {
@@ -341,7 +352,7 @@ fn disk_unlisted(syllabus: &Note, lesson: &Note) -> Finding {
         target: Some(lesson.path.clone()),
         resolved_to: Some(syllabus.path.clone()),
         collision_members: Vec::new(),
-        fingerprint: fingerprint("map.disk_mismatch", &lesson.path, &syllabus.path),
+        fingerprint: fingerprint("map.disk_unlisted", &lesson.path, &syllabus.path),
     }
 }
 
@@ -447,21 +458,26 @@ mod tests {
                 "---\ntype: lesson\ndomain: golang\nstatus: draft\n---\n",
             ),
         ]);
-        let f = of_rule(&g, "map.disk_mismatch");
-        let by_target = |t: &str| f.iter().find(|x| x.target.as_deref() == Some(t));
+        // Direction A is the gate-worthy rule; Direction B is the advisory map.disk_unlisted.
+        let dir_a = of_rule(&g, "map.disk_mismatch");
+        let dir_b = of_rule(&g, "map.disk_unlisted");
+        let find = |fs: &[crate::model::Finding], t: &str| {
+            fs.iter().find(|x| x.target.as_deref() == Some(t)).cloned()
+        };
         // Direction A: [[Ghost Lesson]] listed but missing -> Warn
         assert_eq!(
-            by_target("Ghost Lesson").unwrap().severity,
+            find(&dir_a, "Ghost Lesson").unwrap().severity,
             crate::Severity::Warn
         );
-        // Direction B: Lesson B on disk (growing), not listed -> Warn
-        let b = by_target("Writing/lessons/golang/Lesson B.md").unwrap();
+        // Direction B: Lesson B on disk (growing), not listed -> Warn (advisory rule)
+        let b = find(&dir_b, "Writing/lessons/golang/Lesson B.md").unwrap();
         assert_eq!(b.severity, crate::Severity::Warn);
         // Direction B: Lesson C is draft, not listed -> Info (expected WIP)
-        let c = by_target("Writing/lessons/golang/Lesson C.md").unwrap();
+        let c = find(&dir_b, "Writing/lessons/golang/Lesson C.md").unwrap();
         assert_eq!(c.severity, crate::Severity::Info);
-        // Lesson A is listed -> no finding
-        assert!(by_target("Writing/lessons/golang/Lesson A.md").is_none());
+        // Lesson A is listed -> no finding in either direction
+        assert!(find(&dir_a, "Writing/lessons/golang/Lesson A.md").is_none());
+        assert!(find(&dir_b, "Writing/lessons/golang/Lesson A.md").is_none());
     }
 
     #[test]

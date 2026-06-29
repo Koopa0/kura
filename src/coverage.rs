@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::graph::{Graph, Resolution};
 
 /// Per-domain concept counts.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DomainCoverage {
     pub domain: String,
     pub concepts: usize,
@@ -21,7 +21,7 @@ pub struct DomainCoverage {
 }
 
 /// The coverage report.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Coverage {
     pub total_concepts: usize,
     pub domains: Vec<DomainCoverage>,
@@ -46,10 +46,14 @@ pub fn compute(graph: &Graph) -> Coverage {
             note.note_type.as_deref(),
             Some("moc" | "topic-map" | "source-map")
         );
-        let body = note.wikilinks.iter().map(|w| w.target.clone());
-        let provenance = note.based_on.iter().chain(&note.related).cloned();
+        let body = note.wikilinks.iter().map(|w| w.target.as_str());
+        let provenance = note
+            .based_on
+            .iter()
+            .chain(&note.related)
+            .map(String::as_str);
         for target in body.chain(provenance) {
-            if let Some(path) = resolve_ref(graph, &target) {
+            for path in resolve_targets(graph, target) {
                 referenced.insert(path);
                 if from_map {
                     mapped.insert(path);
@@ -100,17 +104,22 @@ pub fn compute(graph: &Graph) -> Coverage {
     }
 }
 
-/// Resolve a body-link or provenance value to one note path, or `None`.
-fn resolve_ref<'a>(graph: &'a Graph, value: &str) -> Option<&'a str> {
+/// Resolve a body-link or provenance value to the note path(s) it reaches. An ambiguous name
+/// contributes an edge to every candidate, so an ambiguously-referenced concept is never miscounted
+/// as a true orphan.
+fn resolve_targets<'a>(graph: &'a Graph, value: &str) -> Vec<&'a str> {
     let trimmed = value.trim();
     let inner = trimmed
         .strip_prefix("[[")
         .and_then(|s| s.strip_suffix("]]"))
         .unwrap_or(trimmed);
-    let target = crate::wikilink::strip_target(inner)?;
+    let Some(target) = crate::wikilink::strip_target(inner) else {
+        return Vec::new();
+    };
     match graph.symbols.resolve(&target) {
-        Resolution::One(path) => Some(path),
-        _ => None,
+        Resolution::One(path) => vec![path],
+        Resolution::Ambiguous(members) => members.iter().map(String::as_str).collect(),
+        Resolution::Unresolved => Vec::new(),
     }
 }
 

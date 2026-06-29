@@ -1,0 +1,9 @@
+---
+source: tests/conformance.rs
+assertion_line: 232
+expression: report.to_jsonl().unwrap()
+---
+{"rule_id":"collision.alias","severity":"warn","path":"Concepts/golang/A.md","field":"aliases","message":"alias \"shared\" is declared by 2 notes, so [[shared]] cannot resolve deterministically","evidence":"shared alias across: Concepts/golang/A.md, Concepts/golang/B.md","suggested_action":"give the alias a single owner note, or qualify the duplicates","source_rule":"vault-schema.toml#rules","target":"shared","collision_members":["Concepts/golang/A.md","Concepts/golang/B.md"],"fingerprint":"c6a289a5d2524c77"}
+{"rule_id":"link.broken","severity":"warn","path":"Concepts/golang/A.md","line":6,"message":"[[Ghost]] resolves to no note","evidence":"no filename or alias matches the target","suggested_action":"create the target note, or change the link to an existing filename/alias","source_rule":"Note-Schema.md#aliases","target":"Ghost","fingerprint":"1e6dec2ff85a905f"}
+{"rule_id":"link.title_not_alias","severity":"warn","path":"Concepts/golang/A.md","line":6,"message":"[[Go Slice 內部結構]] resolves to no filename or alias","evidence":"the target is the title of Concepts/golang/Go Slice.md but not one of its aliases","suggested_action":"add the title to Concepts/golang/Go Slice.md's aliases, or link an existing filename/alias","source_rule":"Note-Schema.md#aliases","target":"Go Slice 內部結構","fingerprint":"f4980b309f407345"}
+{"rule_id":"provenance.unresolved","severity":"warn","path":"Concepts/golang/B.md","field":"based_on","message":"based_on -> [[Missing]] resolves to nothing","evidence":"no note, alias, or lesson slug matches the reference","suggested_action":"fix the reference, or create the target note","source_rule":"vault-schema.toml#provenance","target":"[[Missing]]","fingerprint":"9c0a72924642edb4"}

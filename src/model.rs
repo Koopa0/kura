@@ -110,7 +110,7 @@ impl Finding {
 /// (unlike `DefaultHasher`) and not tied to line numbers, so a consumer can set-diff two stateless
 /// scans to find a branch's delta.
 #[must_use]
-pub fn fingerprint(rule_id: &str, path: &str, target: &str) -> String {
+pub(crate) fn fingerprint(rule_id: &str, path: &str, target: &str) -> String {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut hash = OFFSET;

@@ -59,7 +59,7 @@ enum Command {
     },
 }
 
-#[derive(Copy, Clone, ValueEnum)]
+#[derive(Debug, Copy, Clone, ValueEnum)]
 enum Format {
     Json,
     Human,

@@ -1,0 +1,23 @@
+---
+source: tests/conformance.rs
+assertion_line: 259
+expression: "kura::coverage::compute(&g)"
+---
+{
+  "total_concepts": 3,
+  "domains": [
+    {
+      "domain": "golang",
+      "concepts": 3,
+      "mounted": 1,
+      "pending_mount": 1,
+      "orphan": 1
+    }
+  ],
+  "pending_mount": [
+    "Concepts/golang/Pending.md"
+  ],
+  "orphans": [
+    "Concepts/golang/Orphan.md"
+  ]
+}

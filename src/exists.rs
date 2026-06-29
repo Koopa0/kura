@@ -6,10 +6,10 @@
 //! matched, so a caller can tell a real duplicate from a merely-similar name. The error-cost is the
 //! opposite of the resolver's: a false "no" makes an agent write a duplicate, so this over-recalls.
 
-use crate::graph::{Graph, filename_stem, normalize};
+use crate::graph::{Graph, filename, filename_stem, normalize};
 
 /// One note that exposes the queried name, and the field it matched on.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Match {
     pub path: String,
     pub field: &'static str,
@@ -17,7 +17,7 @@ pub struct Match {
 }
 
 /// The result of an existence query.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Report {
     pub query: String,
     pub matches: Vec<Match>,
@@ -40,6 +40,12 @@ pub fn lookup(graph: &Graph, query: &str) -> Report {
         let stem = filename_stem(&note.path);
         if normalize(stem) == key {
             matches.push(hit(note, "filename", stem));
+        }
+        // Also match the full filename (e.g. a query of "Note.md" or a non-md "x.canvas"), so a
+        // caller that built a candidate filename never gets a false "not found".
+        let full = filename(&note.path);
+        if full != stem && normalize(full) == key {
+            matches.push(hit(note, "filename", full));
         }
         if let Some(title) = &note.title {
             if normalize(title) == key {

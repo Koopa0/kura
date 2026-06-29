@@ -29,6 +29,7 @@ pub const RULE_IDS: &[&str] = &[
     "collision.alias",
     "provenance.unresolved",
     "map.disk_mismatch",
+    "map.disk_unlisted",
 ];
 
 /// Collect the fingerprints from a prior run's JSONL, for a `--baseline` delta. Lines that do not
