@@ -19,6 +19,29 @@ mod wikilink;
 pub use graph::{Graph, Resolution, SymbolTable};
 pub use model::{Finding, Note, Severity, WikiLink};
 
+/// Every rule id kura can emit. A `--deny` value is validated against this so a typo fails loudly
+/// instead of silently disabling the gate.
+pub const RULE_IDS: &[&str] = &[
+    "link.title_not_alias",
+    "link.broken",
+    "collision.alias",
+    "provenance.unresolved",
+    "map.disk_mismatch",
+];
+
+/// Collect the fingerprints from a prior run's JSONL, for a `--baseline` delta. Lines that do not
+/// parse or carry no fingerprint are skipped (a baseline is advisory input, not a hard contract).
+#[must_use]
+pub fn parse_baseline(jsonl: &str) -> std::collections::HashSet<String> {
+    jsonl
+        .lines()
+        .filter_map(|line| {
+            let value: serde_json::Value = serde_json::from_str(line).ok()?;
+            value.get("fingerprint")?.as_str().map(str::to_owned)
+        })
+        .collect()
+}
+
 /// Tool error (the library uses concrete `thiserror` types; the binary boundary uses `anyhow`).
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -58,6 +81,19 @@ impl Report {
     #[must_use]
     pub fn has_at_least(&self, deny: Severity) -> bool {
         self.findings.iter().any(|f| f.severity >= deny)
+    }
+
+    /// Drop findings whose fingerprint is already in `baseline`, leaving only what this run newly
+    /// introduced. The whole point of delta gating: judge a branch by what it changed, not by the
+    /// corpus's standing state.
+    pub fn retain_new(&mut self, baseline: &std::collections::HashSet<String>) {
+        self.findings.retain(|f| !baseline.contains(&f.fingerprint));
+    }
+
+    /// Whether any finding's rule is in the `deny` set (per-rule gating).
+    #[must_use]
+    pub fn gated(&self, deny: &[String]) -> bool {
+        self.findings.iter().any(|f| deny.contains(&f.rule_id))
     }
 
     /// Render findings as JSONL (one JSON object per line) — pure data for stdout in json mode.
@@ -128,4 +164,62 @@ pub fn check(root: &std::path::Path, paths: &[String], all: bool) -> Result<Repo
     let mut report = Report { findings };
     report.sort();
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    // unwrap on known-good fixtures is the assertion itself.
+    #![allow(clippy::unwrap_used)]
+
+    use crate::Report;
+    use crate::model::{Finding, Severity, fingerprint};
+
+    fn finding(rule: &str, path: &str, target: &str) -> Finding {
+        Finding {
+            rule_id: rule.to_owned(),
+            severity: Severity::Warn,
+            path: path.to_owned(),
+            line: None,
+            field: None,
+            message: String::new(),
+            evidence: String::new(),
+            suggested_action: String::new(),
+            source_rule: String::new(),
+            target: Some(target.to_owned()),
+            resolved_to: None,
+            collision_members: Vec::new(),
+            fingerprint: fingerprint(rule, path, target),
+        }
+    }
+
+    #[test]
+    fn baseline_delta_keeps_only_new_findings() {
+        let mut report = Report {
+            findings: vec![
+                finding("link.broken", "a.md", "X"),
+                finding("collision.alias", "b.md", "Y"),
+            ],
+        };
+        // A baseline that already contains the first finding.
+        let first_line = report
+            .to_jsonl()
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_owned();
+        report.retain_new(&crate::parse_baseline(&first_line));
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.findings[0].rule_id, "collision.alias");
+    }
+
+    #[test]
+    fn gate_fires_only_on_denied_rules() {
+        let report = Report {
+            findings: vec![finding("link.broken", "a.md", "X")],
+        };
+        assert!(report.gated(&["link.broken".to_owned()]));
+        assert!(!report.gated(&["collision.alias".to_owned()]));
+        assert!(!report.gated(&[]));
+    }
 }

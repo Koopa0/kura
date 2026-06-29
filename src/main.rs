@@ -39,12 +39,15 @@ enum Command {
     Check {
         /// Only report findings for these paths (the graph is still built from the whole root).
         paths: Vec<String>,
-        /// Include System/ (by default only knowledge dirs are scanned).
+        /// Include System/ (excluded by default).
         #[arg(long)]
         all: bool,
-        /// Exit non-zero when a finding at this rule/severity or above exists (CI/gate).
+        /// Fail (exit 1) if a finding with this rule id exists; repeatable.
         #[arg(long)]
-        deny: Option<String>,
+        deny: Vec<String>,
+        /// A prior run's JSONL; report and gate only on findings this run newly introduced.
+        #[arg(long)]
+        baseline: Option<PathBuf>,
     },
     /// Report MOC coverage + domain list + symbol table + gaps + orphans.
     Coverage,
@@ -74,15 +77,31 @@ fn run() -> anyhow::Result<ExitCode> {
         .unwrap_or(std::env::current_dir().context("get cwd")?);
 
     match cli.command {
-        Command::Check { paths, all, deny } => {
-            let report = kura::check(&root, &paths, all).context("check")?;
+        Command::Check {
+            paths,
+            all,
+            deny,
+            baseline,
+        } => {
+            for rule in &deny {
+                anyhow::ensure!(
+                    kura::RULE_IDS.contains(&rule.as_str()),
+                    "unknown --deny rule {rule:?}; known rules: {}",
+                    kura::RULE_IDS.join(", ")
+                );
+            }
+            let mut report = kura::check(&root, &paths, all).context("check")?;
+            if let Some(path) = &baseline {
+                let jsonl = std::fs::read_to_string(path)
+                    .with_context(|| format!("read baseline {}", path.display()))?;
+                report.retain_new(&kura::parse_baseline(&jsonl));
+            }
             match output_format(cli.format) {
                 // json: pure JSONL on stdout. human: the summary on stdout.
                 Format::Json => print!("{}", report.to_jsonl().context("serialize findings")?),
                 Format::Human => print!("{}", report.summary()),
             }
-            let deny_hit = report_has_deny(&report, deny.as_deref());
-            Ok(if deny_hit {
+            Ok(if report.gated(&deny) {
                 ExitCode::from(1)
             } else {
                 ExitCode::SUCCESS
@@ -104,12 +123,4 @@ fn output_format(flag: Option<Format>) -> Format {
             Format::Json
         }
     })
-}
-
-fn report_has_deny(report: &kura::Report, deny: Option<&str>) -> bool {
-    match deny {
-        Some("error") => report.has_at_least(kura::Severity::Error),
-        Some("warn") => report.has_at_least(kura::Severity::Warn),
-        _ => false,
-    }
 }
