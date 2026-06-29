@@ -118,7 +118,13 @@ fn run() -> anyhow::Result<ExitCode> {
             })
         }
         Command::Coverage => {
-            eprintln!("kura coverage: not implemented yet");
+            let graph = kura::load_graph(&root).context("load graph")?;
+            let coverage = kura::coverage::compute(&graph);
+            let out = match output_format(format) {
+                Format::Json => serde_json::to_string(&coverage).context("serialize")? + "\n",
+                Format::Human => render_coverage(&coverage),
+            };
+            print!("{out}");
             Ok(ExitCode::SUCCESS)
         }
         Command::Exists { name } => {
@@ -136,6 +142,30 @@ fn run() -> anyhow::Result<ExitCode> {
             })
         }
     }
+}
+
+/// Human rendering of the coverage report.
+fn render_coverage(c: &kura::coverage::Coverage) -> String {
+    use std::fmt::Write as _;
+    let mut s = format!(
+        "{} concepts across {} domains\n",
+        c.total_concepts,
+        c.domains.len()
+    );
+    for d in &c.domains {
+        let _ = writeln!(
+            s,
+            "  {:<16} {} concepts: {} mounted, {} pending-mount, {} orphan",
+            d.domain, d.concepts, d.mounted, d.pending_mount, d.orphan
+        );
+    }
+    if !c.orphans.is_empty() {
+        let _ = writeln!(s, "orphans ({}):", c.orphans.len());
+        for p in &c.orphans {
+            let _ = writeln!(s, "  {p}");
+        }
+    }
+    s
 }
 
 /// Human rendering of an existence query.

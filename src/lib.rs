@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod coverage;
 pub mod exists;
 pub mod graph;
 pub mod model;
