@@ -42,7 +42,8 @@ enum Command {
         /// Include System/ (excluded by default).
         #[arg(long)]
         all: bool,
-        /// Fail (exit 1) if a finding with this rule id exists; repeatable.
+        /// Fail (exit 1) on a finding matching this rule id, or a severity keyword
+        /// (error|warn|info) to gate on any finding at that level or above; repeatable.
         #[arg(long)]
         deny: Vec<String>,
         /// A prior run's JSONL; report and gate only on findings this run newly introduced.
@@ -97,8 +98,9 @@ fn run() -> anyhow::Result<ExitCode> {
         } => {
             for rule in &deny {
                 anyhow::ensure!(
-                    kura::RULE_IDS.contains(&rule.as_str()),
-                    "unknown --deny rule {rule:?}; known rules: {}",
+                    kura::Severity::from_keyword(rule).is_some()
+                        || kura::RULE_IDS.contains(&rule.as_str()),
+                    "unknown --deny {rule:?}; use a severity (error|warn|info) or a rule id: {}",
                     kura::RULE_IDS.join(", ")
                 );
             }

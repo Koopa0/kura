@@ -105,14 +105,19 @@ impl Report {
         self.findings.retain(|f| !baseline.contains(&f.fingerprint));
     }
 
-    /// Whether any finding gates: its rule is denied and its severity is at least `Warn`. Info-level
-    /// findings (a tracked forward-reference under a gap heading) never gate, even when their rule is
-    /// denied.
+    /// Whether any finding gates. A `--deny` token is either a severity keyword (`error`/`warn`/
+    /// `info`) or a rule id, and the two forms coexist:
+    /// - severity keyword: any finding at or above the lowest denied severity gates (so `--deny
+    ///   error` gates on every error, without listing each `schema.*` id);
+    /// - rule id: a finding of that rule gates, but only at `Warn` or above — an info-level finding
+    ///   (a tracked forward-reference) never gates via its rule id.
     #[must_use]
     pub fn gated(&self, deny: &[String]) -> bool {
-        self.findings
-            .iter()
-            .any(|f| f.severity >= Severity::Warn && deny.contains(&f.rule_id))
+        let threshold = deny.iter().filter_map(|d| Severity::from_keyword(d)).min();
+        self.findings.iter().any(|f| {
+            threshold.is_some_and(|t| f.severity >= t)
+                || (f.severity >= Severity::Warn && deny.contains(&f.rule_id))
+        })
     }
 
     /// Render findings as JSONL (one JSON object per line) — pure data for stdout in json mode.
@@ -249,5 +254,31 @@ mod tests {
         };
         // a tracked forward-reference (Info) must not gate even when its rule is denied
         assert!(!report.gated(&["link.broken".to_owned()]));
+    }
+
+    #[test]
+    fn deny_severity_keyword_gates_by_level() {
+        let mut err = finding("schema.enum", "a.md", "X");
+        err.severity = Severity::Error;
+        let warn = finding("link.broken", "b.md", "Y"); // Warn by default
+        let report = Report {
+            findings: vec![err, warn],
+        };
+        // `--deny error` gates on the error without naming each schema.* rule
+        assert!(report.gated(&["error".to_owned()]));
+        // `--deny warn` gates on warn-or-above (both findings qualify)
+        assert!(report.gated(&["warn".to_owned()]));
+        // a severity keyword and a rule id coexist
+        assert!(report.gated(&["error".to_owned(), "collision.alias".to_owned()]));
+    }
+
+    #[test]
+    fn deny_error_ignores_a_warn_only_report() {
+        // only a Warn finding -> `--deny error` does not gate (error threshold not met)
+        let report = Report {
+            findings: vec![finding("link.broken", "a.md", "X")],
+        };
+        assert!(!report.gated(&["error".to_owned()]));
+        assert!(report.gated(&["warn".to_owned()]));
     }
 }

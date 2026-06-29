@@ -27,6 +27,20 @@ impl std::fmt::Display for Severity {
     }
 }
 
+impl Severity {
+    /// Parse a `--deny` severity keyword (`error` / `warn` / `info`); `None` for anything else (e.g.
+    /// a rule id). Lets `--deny` accept a severity threshold alongside per-rule ids.
+    #[must_use]
+    pub fn from_keyword(token: &str) -> Option<Self> {
+        match token {
+            "info" => Some(Severity::Info),
+            "warn" => Some(Severity::Warn),
+            "error" => Some(Severity::Error),
+            _ => None,
+        }
+    }
+}
+
 /// A corpus node (one note). The symbol table and link graph are built on these.
 #[derive(Debug, Clone)]
 pub struct Note {
