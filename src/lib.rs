@@ -12,6 +12,7 @@
 pub mod graph;
 pub mod model;
 mod note;
+pub mod rules;
 pub mod vault;
 mod wikilink;
 
@@ -58,16 +59,69 @@ impl Report {
     pub fn has_at_least(&self, deny: Severity) -> bool {
         self.findings.iter().any(|f| f.severity >= deny)
     }
+
+    /// Render findings as JSONL (one JSON object per line) — pure data for stdout in json mode.
+    ///
+    /// # Errors
+    /// Returns a `serde_json` error if a finding fails to serialize.
+    pub fn to_jsonl(&self) -> serde_json::Result<String> {
+        let mut out = String::new();
+        for f in &self.findings {
+            out.push_str(&serde_json::to_string(f)?);
+            out.push('\n');
+        }
+        Ok(out)
+    }
+
+    /// A human summary: a count line, then every non-info finding (info is hidden by default).
+    #[must_use]
+    pub fn summary(&self) -> String {
+        use std::fmt::Write as _;
+        let mut s = String::new();
+        let _ = writeln!(
+            s,
+            "{} findings: {} error, {} warn, {} info",
+            self.findings.len(),
+            self.count(Severity::Error),
+            self.count(Severity::Warn),
+            self.count(Severity::Info),
+        );
+        for f in self
+            .findings
+            .iter()
+            .filter(|f| f.severity != Severity::Info)
+        {
+            let _ = writeln!(
+                s,
+                "  [{:?}] {}:{} {}",
+                f.severity,
+                f.path,
+                f.line.unwrap_or(0),
+                f.message
+            );
+        }
+        s
+    }
 }
 
 /// Scan `root` for corpus-level findings.
 ///
 /// # Errors
 /// Returns [`Error`] if walking or reading a file fails.
-pub fn check(root: &std::path::Path, _paths: &[String]) -> Result<Report> {
-    // For now this only builds the graph (walk -> parse -> symbol table) to prove the pipeline runs
-    // on the real tree without panicking; finding emission is not wired yet, so the graph is dropped.
+pub fn check(root: &std::path::Path, paths: &[String]) -> Result<Report> {
     let walk = vault::load(root)?;
-    let _ = Graph::build(walk.notes, &walk.resources);
-    Ok(Report::default())
+    let graph = Graph::build(walk.notes, &walk.resources);
+    let mut findings = rules::run(&graph);
+    // Path arguments only filter which findings are printed; the graph is always whole-tree.
+    if !paths.is_empty() {
+        let wanted: Vec<String> = paths.iter().map(|p| p.replace('\\', "/")).collect();
+        findings.retain(|f| {
+            wanted
+                .iter()
+                .any(|w| f.path == *w || f.path.starts_with(&format!("{w}/")))
+        });
+    }
+    let mut report = Report { findings };
+    report.sort();
+    Ok(report)
 }

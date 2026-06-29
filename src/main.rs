@@ -76,11 +76,13 @@ fn run() -> anyhow::Result<ExitCode> {
     match cli.command {
         Command::Check { paths, all, deny } => {
             let _ = all; // scope policy (default excludes System/) not wired yet
-            let mut report = kura::check(&root, &paths).context("check")?;
-            report.sort();
-            // output (pure JSONL on stdout, or human summary) not wired yet
-            emit_stub(&report);
-            let deny_hit = deny.is_some() && report_has_deny(&report, deny.as_deref());
+            let report = kura::check(&root, &paths).context("check")?;
+            match output_format(cli.format) {
+                // json: pure JSONL on stdout. human: the summary on stdout.
+                Format::Json => print!("{}", report.to_jsonl().context("serialize findings")?),
+                Format::Human => print!("{}", report.summary()),
+            }
+            let deny_hit = report_has_deny(&report, deny.as_deref());
             Ok(if deny_hit {
                 ExitCode::from(1)
             } else {
@@ -94,14 +96,15 @@ fn run() -> anyhow::Result<ExitCode> {
     }
 }
 
-fn emit_stub(report: &kura::Report) {
-    eprintln!(
-        "kura check: emit not wired yet. findings={} error={} warn={} info={}",
-        report.findings.len(),
-        report.count(kura::Severity::Error),
-        report.count(kura::Severity::Warn),
-        report.count(kura::Severity::Info),
-    );
+/// Resolve the output format: explicit flag wins, otherwise json for a pipe, human for a terminal.
+fn output_format(flag: Option<Format>) -> Format {
+    flag.unwrap_or_else(|| {
+        if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+            Format::Human
+        } else {
+            Format::Json
+        }
+    })
 }
 
 fn report_has_deny(report: &kura::Report, deny: Option<&str>) -> bool {

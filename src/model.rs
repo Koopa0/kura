@@ -85,3 +85,40 @@ impl Finding {
         (&self.path, self.line.unwrap_or(0), &self.rule_id)
     }
 }
+
+/// Stable fingerprint for a finding: FNV-1a over (rule_id, path, target), hex-encoded. Deterministic
+/// across runs and machines (unlike `DefaultHasher`) and not tied to line numbers, so a consumer can
+/// set-diff two stateless scans to find a branch's delta.
+#[must_use]
+pub fn fingerprint(rule_id: &str, path: &str, target: &str) -> String {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    for part in [rule_id, path, target] {
+        for &byte in part.as_bytes() {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(PRIME);
+        }
+        // A separator so ("a", "b") and ("ab", "") cannot collide.
+        hash = (hash ^ u64::from(b'\x1f')).wrapping_mul(PRIME);
+    }
+    format!("{hash:016x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fingerprint;
+
+    #[test]
+    fn fingerprint_is_stable_and_field_sensitive() {
+        assert_eq!(
+            fingerprint("link.broken", "a/b.md", "X"),
+            fingerprint("link.broken", "a/b.md", "X"),
+        );
+        assert_ne!(
+            fingerprint("link.broken", "a/b.md", "X"),
+            fingerprint("link.broken", "a/b.md", "Y"),
+        );
+        // The separator prevents field-boundary collisions.
+        assert_ne!(fingerprint("ab", "", "X"), fingerprint("a", "b", "X"),);
+    }
+}
