@@ -86,11 +86,13 @@ cargo fmt --check
 
 ## Status
 
-The full v1 surface is in place, with conformance tests over real cases: the Obsidian-faithful
-resolver; the five checks (`link.title_not_alias`, `link.broken`, `collision.alias`,
-`provenance.unresolved`, `map.disk_mismatch`); the JSONL output contract with stable fingerprints,
-deterministic ordering, scope, and delta gating; and the `coverage` and `exists` commands. Absorbing
-the per-file frontmatter linter, supersession tracking, and an MCP server are future work.
+The full v1 surface is in place, with conformance and golden snapshot tests over real cases: the
+Obsidian-faithful resolver; the checks — `link.title_not_alias`, `link.broken`, `link.broken.path`
+(markdown/backtick file references), `collision.alias`, `provenance.unresolved`, and
+`map.disk_mismatch` / `map.disk_unlisted` (the two directions of syllabus-vs-disk reconciliation,
+where only the first gates); the JSONL output contract with stable fingerprints, deterministic
+ordering, scope, and delta gating; and the `coverage` and `exists` commands. Absorbing the per-file
+frontmatter linter, supersession tracking, and an MCP server are future work.
 
 ## License
 
