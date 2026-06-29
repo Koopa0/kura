@@ -22,6 +22,7 @@ impl Note {
             source_kind: None,
             topics: Vec::new(),
             slug: None,
+            title_en: None,
             based_on: Vec::new(),
             related: Vec::new(),
             evolution_predecessor: None,
@@ -40,6 +41,7 @@ impl Note {
                     note.source_kind = str_field(doc, "source_kind");
                     note.topics = list_field(doc, "topics");
                     note.slug = str_field(doc, "slug");
+                    note.title_en = str_field(doc, "title_en");
                     note.based_on = list_field(doc, "based_on");
                     note.related = list_field(doc, "related");
                     note.evolution_predecessor = str_field(doc, "evolution_predecessor");

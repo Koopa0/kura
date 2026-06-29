@@ -51,6 +51,12 @@ enum Command {
     },
     /// Report MOC coverage + domain list + symbol table + gaps + orphans.
     Coverage,
+    /// Ask whether a note for a name already exists (filename / title / alias / title_en).
+    /// Exit 0 if it exists, 1 if not — for a dedup check before writing.
+    Exists {
+        /// The concept or note name to look up.
+        name: String,
+    },
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -115,7 +121,38 @@ fn run() -> anyhow::Result<ExitCode> {
             eprintln!("kura coverage: not implemented yet");
             Ok(ExitCode::SUCCESS)
         }
+        Command::Exists { name } => {
+            let graph = kura::load_graph(&root).context("load graph")?;
+            let report = kura::exists::lookup(&graph, &name);
+            let out = match output_format(format) {
+                Format::Json => serde_json::to_string(&report).context("serialize")? + "\n",
+                Format::Human => render_exists(&report),
+            };
+            print!("{out}");
+            Ok(if report.found() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            })
+        }
     }
+}
+
+/// Human rendering of an existence query.
+fn render_exists(report: &kura::exists::Report) -> String {
+    use std::fmt::Write as _;
+    if report.matches.is_empty() {
+        return format!("\"{}\" does not exist\n", report.query);
+    }
+    let mut s = format!(
+        "\"{}\" exists in {} note(s):\n",
+        report.query,
+        report.matches.len()
+    );
+    for m in &report.matches {
+        let _ = writeln!(s, "  {} (matched {})", m.path, m.field);
+    }
+    s
 }
 
 /// Resolve the output format: explicit flag wins, otherwise json for a pipe, human for a terminal.

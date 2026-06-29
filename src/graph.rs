@@ -120,7 +120,7 @@ fn filename(path: &str) -> &str {
 }
 
 /// Filename without directory or `.md`.
-fn filename_stem(path: &str) -> &str {
+pub(crate) fn filename_stem(path: &str) -> &str {
     let f = filename(path);
     f.strip_suffix(".md").unwrap_or(f)
 }

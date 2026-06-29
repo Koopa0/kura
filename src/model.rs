@@ -39,6 +39,8 @@ pub struct Note {
     pub source_kind: Option<String>,
     pub topics: Vec<String>,
     pub slug: Option<String>,
+    /// English title (lesson frontmatter); a writer may search a concept by its English name.
+    pub title_en: Option<String>,
     /// Raw values of the provenance / relation fields (not yet resolved).
     pub based_on: Vec<String>,
     pub related: Vec<String>,

@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod exists;
 pub mod graph;
 pub mod model;
 mod note;
@@ -144,13 +145,21 @@ impl Report {
     }
 }
 
+/// Walk `root` and build the link graph (notes + resolver). Shared by `check`, `exists`, `coverage`.
+///
+/// # Errors
+/// Returns [`Error`] if walking or reading a file fails.
+pub fn load_graph(root: &std::path::Path) -> Result<Graph> {
+    let walk = vault::load(root)?;
+    Ok(Graph::build(walk.notes, &walk.resources))
+}
+
 /// Scan `root` for corpus-level findings.
 ///
 /// # Errors
 /// Returns [`Error`] if walking or reading a file fails.
 pub fn check(root: &std::path::Path, paths: &[String], all: bool) -> Result<Report> {
-    let walk = vault::load(root)?;
-    let graph = Graph::build(walk.notes, &walk.resources);
+    let graph = load_graph(root)?;
     let mut findings = rules::run(&graph);
     // The graph is always built whole-tree; these only filter which findings are printed. A finding
     // is kept if any path it touches (its citing path or any collision member) is in scope.
