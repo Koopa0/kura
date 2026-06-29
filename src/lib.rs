@@ -16,6 +16,7 @@ pub mod graph;
 pub mod model;
 mod note;
 pub mod rules;
+pub mod schema;
 pub mod vault;
 mod wikilink;
 
