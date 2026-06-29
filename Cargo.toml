@@ -22,6 +22,9 @@ toml = "0.8"
 pulldown-cmark = "0.12"
 ignore = "0.4"
 unicode-normalization = "0.1"
+# frontmatter is YAML; serde_yaml is unmaintained, so use a maintained pure parser and pull fields
+# by hand. default-features = false drops the encoding/charset detection (frontmatter is UTF-8).
+yaml-rust2 = { version = "0.11", default-features = false }
 thiserror = "2"
 anyhow = "1"
 
@@ -32,13 +35,14 @@ insta = "1"
 unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
+all = { level = "deny", priority = -2 }
 pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
-# 中英混排 doc comment 裡的英文識別字會誤觸;rust-spec:吵的 pedantic 用 allow 覆蓋
+# doc_markdown false-fires on technical terms with internal capitals (e.g. CommonMark)
 doc_markdown = "allow"
-# lib code: make panic points visible (rust-spec rust-project-init)
+# lib code: keep panic points visible
 unwrap_used = "warn"
 expect_used = "warn"

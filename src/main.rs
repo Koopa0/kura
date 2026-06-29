@@ -1,9 +1,11 @@
-//! kura CLI —— 薄殼。所有邏輯在 lib(`kura::`)。
+//! kura CLI — a thin shell. All logic lives in the library (`kura::`).
 //!
-//! 退出碼(對齊 schema_lint 0/1/2):
-//!   0 = 乾淨(無 deny 級 finding)
-//!   1 = gate-hit(有 deny 級)
-//!   2 = tool-error(壞 root / parse panic 等)—— 由 anyhow 經 main 的 Err 路徑回傳
+//! Exit codes:
+//!   0 = clean (no deny-level finding)
+//!   1 = gate-hit (a deny-level finding exists)
+//!   2 = tool-error (bad root / parse panic) — returned via main's Err path
+
+#![forbid(unsafe_code)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -12,34 +14,39 @@ use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
-#[command(name = "kura", version, about = "蔵 — read-only 知識圖守衛 / 索引器")]
+#[command(
+    name = "kura",
+    version,
+    about = "read-only knowledge-graph guardian / indexer"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
 
-    /// vault 根(預設 cwd);可指 git worktree。
+    /// Vault root (defaults to cwd); may point at a git worktree.
     #[arg(long, global = true)]
     root: Option<PathBuf>,
 
-    /// 輸出格式;預設依 tty 自動(json 給 agent、human 給人)。
+    /// Output format; defaults by tty (json for agents, human for people).
     #[arg(long, global = true, value_enum)]
     format: Option<Format>,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    /// 掃語料層問題(斷鏈/撞名/provenance/map↔disk)。path 只 filter 輸出,圖永遠全掃。
+    /// Scan for corpus-level problems (broken links / collisions / provenance / map-vs-disk).
+    /// Path args only filter output; the graph is always built from the whole root.
     Check {
-        /// 只報這些 path 的 finding(圖仍從整個 root 建)。
+        /// Only report findings for these paths (the graph is still built from the whole root).
         paths: Vec<String>,
-        /// 含 System/(預設只掃 knowledge dirs)。
+        /// Include System/ (by default only knowledge dirs are scanned).
         #[arg(long)]
         all: bool,
-        /// 此 rule/severity 以上 → 非零 exit(CI/gate)。
+        /// Exit non-zero when a finding at this rule/severity or above exists (CI/gate).
         #[arg(long)]
         deny: Option<String>,
     },
-    /// 生成 MOC 覆蓋率 + domain 清單 + symbol table + 缺口 + orphan。
+    /// Report MOC coverage + domain list + symbol table + gaps + orphans.
     Coverage,
 }
 
@@ -54,7 +61,7 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(e) => {
             eprintln!("kura: {e:#}");
-            ExitCode::from(2) // tool-error,與 gate-hit(1)區分
+            ExitCode::from(2) // tool-error, distinct from gate-hit (1)
         }
     }
 }
@@ -64,14 +71,14 @@ fn run() -> anyhow::Result<ExitCode> {
     let root = cli
         .root
         .clone()
-        .unwrap_or(std::env::current_dir().context("取得 cwd")?);
+        .unwrap_or(std::env::current_dir().context("get cwd")?);
 
     match cli.command {
         Command::Check { paths, all, deny } => {
-            let _ = all; // TODO(P1): scope 政策(預設排除 System/)
+            let _ = all; // scope policy (default excludes System/) not wired yet
             let mut report = kura::check(&root, &paths).context("check")?;
             report.sort();
-            // TODO(P2): 依 --format 出 JSONL(stdout 純)或 human 摘要(blast-radius 排序)
+            // output (pure JSONL on stdout, or human summary) not wired yet
             emit_stub(&report);
             let deny_hit = deny.is_some() && report_has_deny(&report, deny.as_deref());
             Ok(if deny_hit {
@@ -81,8 +88,7 @@ fn run() -> anyhow::Result<ExitCode> {
             })
         }
         Command::Coverage => {
-            // TODO(P3): 覆蓋率 + domain + symbol table + 缺口 + orphan
-            eprintln!("kura coverage: P3 未實作(scaffold)");
+            eprintln!("kura coverage: not implemented yet");
             Ok(ExitCode::SUCCESS)
         }
     }
@@ -90,7 +96,7 @@ fn run() -> anyhow::Result<ExitCode> {
 
 fn emit_stub(report: &kura::Report) {
     eprintln!(
-        "kura check: P1/P2 未實作(scaffold)。findings={} error={} warn={} info={}",
+        "kura check: emit not wired yet. findings={} error={} warn={} info={}",
         report.findings.len(),
         report.count(kura::Severity::Error),
         report.count(kura::Severity::Warn),
