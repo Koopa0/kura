@@ -319,6 +319,38 @@ fn vault_load_separates_notes_from_resources() -> Result<(), Box<dyn std::error:
 }
 
 #[test]
+fn link_broken_path_warns_in_root_and_infos_external() -> Result<(), Box<dyn std::error::Error>> {
+    // A relative .md link that stays in the vault but has no file is a real dead link (warn); one
+    // that escapes the root cannot be stat'd deterministically, so it is info, not broken.
+    let dir = std::env::temp_dir().join(format!("kura-diskpath-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("Writing/lessons/golang"))?;
+    std::fs::write(dir.join("Writing/lessons/golang/Real.md"), "body\n")?;
+    std::fs::write(
+        dir.join("Writing/lessons/golang/Lesson.md"),
+        "[ok](Real.md) [dead](Gone.md) [ext](../../../../../exam/go/x.md)\n",
+    )?;
+    let report = kura::check(&dir, &[], false)?;
+    std::fs::remove_dir_all(&dir)?;
+    let lbp: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "link.broken.path")
+        .collect();
+    let by_target = |t: &str| lbp.iter().find(|f| f.target.as_deref() == Some(t));
+    assert!(
+        by_target("Real.md").is_none(),
+        "the existing sibling resolves"
+    );
+    assert_eq!(by_target("Gone.md").unwrap().severity, kura::Severity::Warn);
+    assert_eq!(
+        by_target("../../../../../exam/go/x.md").unwrap().severity,
+        kura::Severity::Info
+    );
+    Ok(())
+}
+
+#[test]
 fn collision_with_a_non_system_member_survives_default_scope()
 -> Result<(), Box<dyn std::error::Error>> {
     // A collision between a System/ note and a knowledge note must not be dropped by the default

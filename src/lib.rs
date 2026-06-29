@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 
 pub mod coverage;
+pub mod diskref;
 pub mod exists;
 pub mod graph;
 pub mod model;
@@ -30,6 +31,7 @@ pub const RULE_IDS: &[&str] = &[
     "provenance.unresolved",
     "map.disk_mismatch",
     "map.disk_unlisted",
+    "link.broken.path",
 ];
 
 /// Collect the fingerprints from a prior run's JSONL, for a `--baseline` delta. Lines that do not
@@ -163,6 +165,7 @@ pub fn load_graph(root: &std::path::Path) -> Result<Graph> {
 pub fn check(root: &std::path::Path, paths: &[String], all: bool) -> Result<Report> {
     let graph = load_graph(root)?;
     let mut findings = rules::run(&graph);
+    findings.extend(diskref::check(&graph.notes, root));
     // The graph is always built whole-tree; these only filter which findings are printed. A finding
     // is kept if any path it touches (its citing path or any collision member) is in scope.
     if !all {

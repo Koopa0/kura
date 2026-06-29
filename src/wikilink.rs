@@ -10,7 +10,7 @@ use std::ops::Range;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
-use crate::model::WikiLink;
+use crate::model::{PathRef, WikiLink};
 
 /// A heading whose text contains one of these marks the following section as planned: wikilinks
 /// under it are forward-references, not broken links.
@@ -38,6 +38,58 @@ pub fn extract(body: &str, body_start_line: usize) -> Vec<WikiLink> {
         });
     }
     links
+}
+
+/// Extract non-wikilink file references: markdown `[text](dest)` links (note-relative) and backticked
+/// `*.md` path tokens (vault-root-relative). HTTP(S) / mailto / anchor links and percent-encoded
+/// paths are skipped, so the link.broken.path check only sees plain in-vault file references.
+#[must_use]
+pub fn extract_path_refs(body: &str, body_start_line: usize) -> Vec<PathRef> {
+    let mut refs = Vec::new();
+    for (event, range) in Parser::new_ext(body, Options::empty()).into_offset_iter() {
+        let found = match &event {
+            Event::Start(Tag::Link { dest_url, .. }) => file_link(dest_url).map(|t| (t, false)),
+            Event::Code(text) => backtick_path(text).map(|t| (t, true)),
+            _ => None,
+        };
+        if let Some((target, code)) = found {
+            let line =
+                body_start_line + body[..range.start].bytes().filter(|&b| b == b'\n').count();
+            refs.push(PathRef { target, line, code });
+        }
+    }
+    refs
+}
+
+/// A markdown link destination that is a plain *relative* reference to a vault note: it ends in
+/// `.md` and is not a URL, a site-absolute (`/…`) or home (`~/…`) path, a glob/placeholder, or
+/// percent-encoded. This deliberately ignores prose written as `[text](word)`, web routes, and
+/// patterns — only a relative `.md` file reference is a checkable link.
+fn file_link(dest: &str) -> Option<String> {
+    let path = dest.split(['#', '?']).next().unwrap_or(dest).trim();
+    is_relative_md_ref(path).then(|| path.to_owned())
+}
+
+/// A backticked token that is a relative vault `.md` path. Unlike a markdown link it must contain a
+/// separator, so a bare `foo.md` mentioned in prose is not mistaken for a path.
+fn backtick_path(text: &str) -> Option<String> {
+    let t = text.trim();
+    (t.contains('/') && is_relative_md_ref(t)).then(|| t.to_owned())
+}
+
+/// Whether `path` is a plain relative `.md` file reference worth stat-ing.
+fn is_relative_md_ref(path: &str) -> bool {
+    !path.is_empty()
+        && std::path::Path::new(path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        && !path.starts_with('/')
+        && !path.starts_with('~')
+        && !path.contains("://")
+        && !path.contains('%')
+        && !path.contains('*')
+        && !path.contains('<')
+        && !path.contains('>')
 }
 
 /// A heading's parsed facts: start byte offset, level (used only for relative ordering), and

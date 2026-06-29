@@ -28,6 +28,7 @@ impl Note {
             evolution_predecessor: None,
             evolution_successors: Vec::new(),
             wikilinks: wikilink::extract(body, body_line),
+            path_refs: wikilink::extract_path_refs(body, body_line),
             no_frontmatter: frontmatter.is_none(),
         };
         if let Some(fm) = frontmatter {

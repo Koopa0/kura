@@ -50,8 +50,23 @@ pub struct Note {
     pub evolution_successors: Vec<String>,
     /// Wikilinks appearing in the body (raw text, not yet resolved).
     pub wikilinks: Vec<WikiLink>,
+    /// Non-wikilink file references in the body (markdown links, backticked path tokens).
+    pub path_refs: Vec<PathRef>,
     /// True when the file has no frontmatter (a raw transcript).
     pub no_frontmatter: bool,
+}
+
+/// A non-wikilink reference to a file: a markdown `[text](path)` link, or a backticked `path.md`
+/// token in prose. The link.broken.path check resolves these against the filesystem, not the graph.
+#[derive(Debug, Clone)]
+pub struct PathRef {
+    /// The raw destination path (a markdown link's `(...)`, or a backtick token's text).
+    pub target: String,
+    /// 1-based line where it appears.
+    pub line: usize,
+    /// True for a backticked path token (resolved vault-root-relative); false for a markdown link
+    /// (resolved relative to the citing note).
+    pub code: bool,
 }
 
 /// A `[[target|display]]` link in a body.
