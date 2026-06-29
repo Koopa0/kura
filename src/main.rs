@@ -63,6 +63,8 @@ enum Command {
 enum Format {
     Json,
     Human,
+    /// A fileable markdown report body (printed to stdout; kura never writes files).
+    Md,
 }
 
 fn main() -> ExitCode {
@@ -107,9 +109,10 @@ fn run() -> anyhow::Result<ExitCode> {
                 report.retain_new(&kura::parse_baseline(&jsonl));
             }
             match output_format(format) {
-                // json: pure JSONL on stdout. human: the summary on stdout.
+                // json: pure JSONL on stdout. human/md: the packed report on stdout.
                 Format::Json => print!("{}", report.to_jsonl().context("serialize findings")?),
-                Format::Human => print!("{}", report.summary()),
+                Format::Human => print!("{}", kura::report::human(&report)),
+                Format::Md => print!("{}", kura::report::markdown(&report)),
             }
             Ok(if report.gated(&deny) {
                 ExitCode::from(1)
@@ -122,7 +125,8 @@ fn run() -> anyhow::Result<ExitCode> {
             let coverage = kura::coverage::compute(&graph);
             let out = match output_format(format) {
                 Format::Json => serde_json::to_string(&coverage).context("serialize")? + "\n",
-                Format::Human => render_coverage(&coverage),
+                // md is a check-report format; coverage/exists fall back to the human view.
+                Format::Human | Format::Md => render_coverage(&coverage),
             };
             print!("{out}");
             Ok(ExitCode::SUCCESS)
@@ -132,7 +136,7 @@ fn run() -> anyhow::Result<ExitCode> {
             let report = kura::exists::lookup(&graph, &name);
             let out = match output_format(format) {
                 Format::Json => serde_json::to_string(&report).context("serialize")? + "\n",
-                Format::Human => render_exists(&report),
+                Format::Human | Format::Md => render_exists(&report),
             };
             print!("{out}");
             Ok(if report.found() {

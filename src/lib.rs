@@ -15,6 +15,7 @@ pub mod exists;
 pub mod graph;
 pub mod model;
 mod note;
+pub mod report;
 pub mod rules;
 pub mod schema;
 pub mod vault;
@@ -125,36 +126,6 @@ impl Report {
             out.push('\n');
         }
         Ok(out)
-    }
-
-    /// A human summary: a count line, then every non-info finding (info is hidden by default).
-    #[must_use]
-    pub fn summary(&self) -> String {
-        use std::fmt::Write as _;
-        let mut s = String::new();
-        let _ = writeln!(
-            s,
-            "{} findings: {} error, {} warn, {} info",
-            self.findings.len(),
-            self.count(Severity::Error),
-            self.count(Severity::Warn),
-            self.count(Severity::Info),
-        );
-        for f in self
-            .findings
-            .iter()
-            .filter(|f| f.severity != Severity::Info)
-        {
-            let _ = writeln!(
-                s,
-                "  [{}] {}:{} {}",
-                f.severity,
-                f.path,
-                f.line.unwrap_or(0),
-                f.message
-            );
-        }
-        s
     }
 }
 
