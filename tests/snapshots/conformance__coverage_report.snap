@@ -19,5 +19,6 @@ expression: "kura::coverage::compute(&g)"
   ],
   "orphans": [
     "Concepts/golang/Orphan.md"
-  ]
+  ],
+  "unrouted": []
 }

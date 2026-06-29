@@ -169,6 +169,16 @@ fn render_coverage(c: &kura::coverage::Coverage) -> String {
             let _ = writeln!(s, "  {p}");
         }
     }
+    if !c.unrouted.is_empty() {
+        let _ = writeln!(s, "unrouted ({}):", c.unrouted.len());
+        for u in &c.unrouted {
+            let _ = writeln!(
+                s,
+                "  {} ({}) -> file under {}",
+                u.path, u.note_type, u.expected_route
+            );
+        }
+    }
     s
 }
 

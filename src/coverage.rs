@@ -20,6 +20,16 @@ pub struct DomainCoverage {
     pub orphan: usize,
 }
 
+/// A routable note (by its type) that is not on the index it belongs to — the "documents do not
+/// scatter" watchdog. A new note of a routable type that nobody filed shows up here next scan.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Unrouted {
+    pub path: String,
+    pub note_type: String,
+    /// The index this type is expected to be filed under.
+    pub expected_route: String,
+}
+
 /// The coverage report.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Coverage {
@@ -29,6 +39,8 @@ pub struct Coverage {
     pub pending_mount: Vec<String>,
     /// Concepts with no inbound edge at all.
     pub orphans: Vec<String>,
+    /// Non-concept routable notes (e.g. research briefs) not yet on their index.
+    pub unrouted: Vec<Unrouted>,
 }
 
 /// Compute coverage over the graph.
@@ -92,15 +104,47 @@ pub fn compute(graph: &Graph) -> Coverage {
         }
     }
 
+    // All-type routing watchdog: a routable type belongs on a specific index. concept is the
+    // 3-layer case above; lessons are owned by map.disk_unlisted; system/guide/template and the
+    // no-frontmatter drills self-exclude (they are not routable types here). Routes not yet active
+    // (synthesis, source-note, …) are added when their index exists, per spec — not pre-wired.
+    let mut unrouted = Vec::new();
+    for note in &graph.notes {
+        if note.path.starts_with("System/") {
+            continue;
+        }
+        if let Some(route) = route_for(note.note_type.as_deref()) {
+            if !mapped.contains(note.path.as_str()) {
+                unrouted.push(Unrouted {
+                    path: note.path.clone(),
+                    note_type: note.note_type.clone().unwrap_or_default(),
+                    expected_route: route.to_owned(),
+                });
+            }
+        }
+    }
+
     let mut domains: Vec<DomainCoverage> = domains.into_values().collect();
     domains.sort_by(|a, b| a.domain.cmp(&b.domain));
     pending.sort();
     orphans.sort();
+    unrouted.sort_by(|a, b| a.path.cmp(&b.path));
     Coverage {
         total_concepts: total,
         domains,
         pending_mount: pending,
         orphans,
+        unrouted,
+    }
+}
+
+/// The index a routable non-concept type belongs on, or `None` if the type is not routed by the
+/// all-type watchdog (concept has its own 3-layer classification; most types route only once their
+/// index note exists).
+fn route_for(note_type: Option<&str>) -> Option<&'static str> {
+    match note_type {
+        Some("research-brief") => Some("Maps/研究 Brief 索引"),
+        _ => None,
     }
 }
 
@@ -175,5 +219,30 @@ mod tests {
             (golang.mounted, golang.pending_mount, golang.orphan),
             (1, 1, 1)
         );
+    }
+
+    #[test]
+    fn research_brief_not_on_its_index_is_unrouted() {
+        let g = graph(&[
+            (
+                "Sources/research/A.md",
+                "---\ntype: research-brief\narea: relocation\n---\n",
+            ),
+            (
+                "Sources/research/B.md",
+                "---\ntype: research-brief\narea: relocation\n---\n",
+            ),
+            (
+                "Maps/研究 Brief 索引.md",
+                "---\ntype: topic-map\n---\n[[A]]\n",
+            ),
+        ]);
+        let cov = compute(&g);
+        // A is filed on the index -> routed; B is not -> flagged unrouted.
+        assert_eq!(cov.unrouted.len(), 1);
+        assert_eq!(cov.unrouted[0].path, "Sources/research/B.md");
+        assert_eq!(cov.unrouted[0].note_type, "research-brief");
+        // research briefs are not concepts, so they do not enter the domain/orphan counts
+        assert_eq!(cov.total_concepts, 0);
     }
 }
