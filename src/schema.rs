@@ -110,6 +110,17 @@ fn lint_note(note: &Note, schema: &Schema, seg: &[&str], out: &mut Vec<Finding>)
     if note.no_frontmatter {
         return; // a note with no frontmatter is legal (a raw transcript)
     }
+    if note.bad_frontmatter {
+        // One finding for the unparseable block — not a false cascade of "field missing".
+        out.push(finding(
+            note,
+            "schema.frontmatter",
+            None,
+            "",
+            "is not valid YAML",
+        ));
+        return;
+    }
     let fm = &note.frontmatter;
     let scalar = |key: &str| {
         fm.get(key)
@@ -196,12 +207,13 @@ fn lint_note(note: &Note, schema: &Schema, seg: &[&str], out: &mut Vec<Finding>)
         }
     }
 
-    // Knowledge notes: full rules. inbox is undefined-shape, so domain is not required of it.
-    let is_inbox = ty == Some("inbox");
-    for key in &schema.fields.required {
-        if is_inbox && key == "domain" {
-            continue;
-        }
+    // Knowledge notes: full rules. inbox is undefined-shape, so it uses the lighter required set.
+    let required = if ty == Some("inbox") {
+        &schema.fields.required_inbox
+    } else {
+        &schema.fields.required
+    };
+    for key in required {
         if !fm.get(key).is_some_and(FmValue::is_present) {
             out.push(finding(
                 note,
@@ -323,7 +335,13 @@ fn finding(note: &Note, rule_id: &str, field: Option<&str>, value: &str, why: &s
         target: (!value.is_empty()).then(|| value.to_owned()),
         resolved_to: None,
         collision_members: Vec::new(),
-        fingerprint: fingerprint(rule_id, &note.path, value),
+        // Fold the field into the fingerprint key: two findings on one note (e.g. two missing
+        // required fields, both with an empty value) must not collide and dedup the delta.
+        fingerprint: fingerprint(
+            rule_id,
+            &note.path,
+            &format!("{}\u{1f}{value}", field.unwrap_or("")),
+        ),
     }
 }
 
@@ -436,5 +454,44 @@ status = "seedling"
         .map(|(r, f, t)| (r.to_owned(), f.to_owned(), t.to_owned()))
         .collect();
         assert_eq!(got, want);
+    }
+
+    /// A `---` block that does not parse yields exactly one finding, not a false cascade of
+    /// "required field missing" — the fields may be present above a syntax error.
+    #[test]
+    fn malformed_frontmatter_is_one_finding_not_a_required_cascade() {
+        let schema: Schema = toml::from_str(FIXTURE).unwrap();
+        let note = crate::model::Note::from_markdown(
+            "Concepts/golang/Broken.md",
+            "---\ntitle: \"unclosed\ndomain: golang\n---\nbody\n",
+        );
+        assert!(note.bad_frontmatter);
+        let findings = super::check(std::slice::from_ref(&note), &schema);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "schema.frontmatter");
+    }
+
+    /// Two distinct required-field findings on one note get distinct fingerprints (so the delta
+    /// baseline cannot collapse them). A `BTreeSet`-based assertion would hide this.
+    #[test]
+    fn distinct_required_findings_get_distinct_fingerprints() {
+        let schema: Schema = toml::from_str(FIXTURE).unwrap();
+        // type present, but title and domain both missing -> two schema.required findings
+        let note = crate::model::Note::from_markdown(
+            "Concepts/golang/Half.md",
+            "---\ntype: concept\nbased_on:\n  - \"[[X]]\"\n---\n",
+        );
+        let required: Vec<_> = super::check(std::slice::from_ref(&note), &schema)
+            .into_iter()
+            .filter(|f| f.rule_id == "schema.required")
+            .collect();
+        assert_eq!(required.len(), 2);
+        let fingerprints: std::collections::HashSet<_> =
+            required.iter().map(|f| f.fingerprint.clone()).collect();
+        assert_eq!(
+            fingerprints.len(),
+            2,
+            "each finding must have a distinct fingerprint"
+        );
     }
 }

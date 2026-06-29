@@ -56,6 +56,10 @@ pub struct Note {
     pub path_refs: Vec<PathRef>,
     /// True when the file has no frontmatter (a raw transcript).
     pub no_frontmatter: bool,
+    /// True when a `---`-fenced block is present but its YAML failed to parse. Distinguished from
+    /// `no_frontmatter` so the schema check reports one "invalid frontmatter" finding instead of a
+    /// false cascade of "required field missing" (the fields may be present above a syntax error).
+    pub bad_frontmatter: bool,
     /// Every frontmatter key and its raw value — the schema checks need all keys (for unknown-key
     /// detection) and the raw enum values, beyond the typed fields above.
     pub frontmatter: BTreeMap<String, FmValue>,

@@ -32,29 +32,34 @@ impl Note {
             wikilinks: wikilink::extract(body, body_line),
             path_refs: wikilink::extract_path_refs(body, body_line),
             no_frontmatter: frontmatter.is_none(),
+            bad_frontmatter: false,
             frontmatter: BTreeMap::new(),
         };
         if let Some(fm) = frontmatter {
-            if let Ok(docs) = YamlLoader::load_from_str(fm) {
-                if let Some(doc) = docs.first() {
-                    note.frontmatter = build_frontmatter(doc);
-                    note.title = str_field(doc, "title");
-                    note.aliases = list_field(doc, "aliases");
-                    note.note_type = str_field(doc, "type");
-                    note.domain = str_field(doc, "domain");
-                    note.status = str_field(doc, "status");
-                    note.source_kind = str_field(doc, "source_kind");
-                    note.topics = list_field(doc, "topics");
-                    note.slug = str_field(doc, "slug");
-                    note.title_en = str_field(doc, "title_en");
-                    note.based_on = list_field(doc, "based_on");
-                    note.related = list_field(doc, "related");
-                    note.evolution_predecessor = str_field(doc, "evolution_predecessor");
-                    note.evolution_successors = list_field(doc, "evolution_successors");
+            match YamlLoader::load_from_str(fm) {
+                Ok(docs) => {
+                    if let Some(doc) = docs.first() {
+                        note.frontmatter = build_frontmatter(doc);
+                        note.title = str_field(doc, "title");
+                        note.aliases = list_field(doc, "aliases");
+                        note.note_type = str_field(doc, "type");
+                        note.domain = str_field(doc, "domain");
+                        note.status = str_field(doc, "status");
+                        note.source_kind = str_field(doc, "source_kind");
+                        note.topics = list_field(doc, "topics");
+                        note.slug = str_field(doc, "slug");
+                        note.title_en = str_field(doc, "title_en");
+                        note.based_on = list_field(doc, "based_on");
+                        note.related = list_field(doc, "related");
+                        note.evolution_predecessor = str_field(doc, "evolution_predecessor");
+                        note.evolution_successors = list_field(doc, "evolution_successors");
+                    }
                 }
+                // A `---` block that does not parse: the graph rules keep their defaults (the
+                // resolver biases to false-negative), and the schema check reports one "invalid
+                // frontmatter" finding instead of a false cascade of "required field missing".
+                Err(_) => note.bad_frontmatter = true,
             }
-            // Malformed YAML keeps the defaults; the resolver biases to false-negative, so a parse
-            // error never invents a phantom broken link here.
         }
         note
     }

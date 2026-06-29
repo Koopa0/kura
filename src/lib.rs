@@ -40,6 +40,7 @@ pub const RULE_IDS: &[&str] = &[
     "schema.domain_folder",
     "schema.legacy_tag",
     "schema.provenance",
+    "schema.frontmatter",
 ];
 
 /// Collect the fingerprints from a prior run's JSONL, for a `--baseline` delta. Lines that do not
@@ -174,9 +175,12 @@ pub fn check(root: &std::path::Path, paths: &[String], all: bool) -> Result<Repo
     let graph = load_graph(root)?;
     let mut findings = rules::run(&graph);
     findings.extend(diskref::check(&graph.notes, root));
-    // Frontmatter checks need the schema; if the vault has no schema, skip them rather than fail.
-    if let Ok(schema) = schema::Schema::load(root) {
-        findings.extend(schema::check(&graph.notes, &schema));
+    // Frontmatter checks need the schema. A missing schema (a vault that has none) skips them; a
+    // malformed schema is a hard error — silently dropping every schema gate would be worse.
+    match schema::Schema::load(root) {
+        Ok(schema) => findings.extend(schema::check(&graph.notes, &schema)),
+        Err(Error::Io(_)) => {}
+        Err(e) => return Err(e),
     }
     // The graph is always built whole-tree; these only filter which findings are printed. A finding
     // is kept if any path it touches (its citing path or any collision member) is in scope.
