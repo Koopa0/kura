@@ -30,6 +30,10 @@ pub struct Note {
     /// Raw values of the provenance / relation fields (not yet resolved).
     pub based_on: Vec<String>,
     pub related: Vec<String>,
+    /// Supersession links (lesson-only): the slug this note supersedes, and the slugs that
+    /// supersede it.
+    pub evolution_predecessor: Option<String>,
+    pub evolution_successors: Vec<String>,
     /// Wikilinks appearing in the body (raw text, not yet resolved).
     pub wikilinks: Vec<WikiLink>,
     /// True when the file has no frontmatter (a raw transcript).

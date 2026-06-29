@@ -23,6 +23,8 @@ impl Note {
             slug: None,
             based_on: Vec::new(),
             related: Vec::new(),
+            evolution_predecessor: None,
+            evolution_successors: Vec::new(),
             wikilinks: wikilink::extract(body, body_line),
             no_frontmatter: frontmatter.is_none(),
         };
@@ -38,6 +40,8 @@ impl Note {
                     note.slug = str_field(doc, "slug");
                     note.based_on = list_field(doc, "based_on");
                     note.related = list_field(doc, "related");
+                    note.evolution_predecessor = str_field(doc, "evolution_predecessor");
+                    note.evolution_successors = list_field(doc, "evolution_successors");
                 }
             }
             // Malformed YAML keeps the defaults; the resolver biases to false-negative, so a parse
