@@ -2,9 +2,11 @@
 //! body wikilinks. Unknown or extra frontmatter keys are ignored here; frontmatter schema
 //! validation lives elsewhere.
 
+use std::collections::BTreeMap;
+
 use yaml_rust2::{Yaml, YamlLoader};
 
-use crate::model::Note;
+use crate::model::{FmValue, Note};
 use crate::wikilink;
 
 impl Note {
@@ -30,10 +32,12 @@ impl Note {
             wikilinks: wikilink::extract(body, body_line),
             path_refs: wikilink::extract_path_refs(body, body_line),
             no_frontmatter: frontmatter.is_none(),
+            frontmatter: BTreeMap::new(),
         };
         if let Some(fm) = frontmatter {
             if let Ok(docs) = YamlLoader::load_from_str(fm) {
                 if let Some(doc) = docs.first() {
+                    note.frontmatter = build_frontmatter(doc);
                     note.title = str_field(doc, "title");
                     note.aliases = list_field(doc, "aliases");
                     note.note_type = str_field(doc, "type");
@@ -81,6 +85,44 @@ fn split_frontmatter(content: &str) -> (Option<&str>, &str, usize) {
     }
     // No closing fence: treat as no frontmatter (conservative).
     (None, content, 1)
+}
+
+/// Capture every frontmatter key and its raw value, for the schema checks (unknown-key detection
+/// and enum validation need the full map, not just the typed fields).
+fn build_frontmatter(doc: &Yaml) -> BTreeMap<String, FmValue> {
+    let mut map = BTreeMap::new();
+    if let Yaml::Hash(hash) = doc {
+        for (key, value) in hash {
+            if let Some(key) = key.as_str() {
+                map.insert(key.to_owned(), fm_value(value));
+            }
+        }
+    }
+    map
+}
+
+/// Convert a YAML value to a generic frontmatter value: lists stay lists; everything else (string,
+/// number, bool, null, nested) collapses to a scalar string (empty for null / non-scalar).
+fn fm_value(value: &Yaml) -> FmValue {
+    match value {
+        Yaml::String(s) => FmValue::Scalar(s.clone()),
+        Yaml::Integer(i) => FmValue::Scalar(i.to_string()),
+        Yaml::Boolean(b) => FmValue::Scalar(b.to_string()),
+        Yaml::Real(r) => FmValue::Scalar(r.clone()),
+        Yaml::Array(items) => FmValue::List(items.iter().map(scalar_text).collect()),
+        _ => FmValue::Scalar(String::new()),
+    }
+}
+
+/// Best-effort scalar text of a YAML value (for list items).
+fn scalar_text(value: &Yaml) -> String {
+    match value {
+        Yaml::String(s) => s.clone(),
+        Yaml::Integer(i) => i.to_string(),
+        Yaml::Boolean(b) => b.to_string(),
+        Yaml::Real(r) => r.clone(),
+        _ => String::new(),
+    }
 }
 
 /// One scalar string field (missing or non-string -> `None`).

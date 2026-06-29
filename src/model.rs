@@ -1,6 +1,8 @@
 //! Core types: `Note` (a corpus node), `Finding` (a diagnostic), `Severity`.
 //! These define the shape of the output contract; the data model is fixed before the logic.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 /// Severity of one diagnostic. Mirrors the 0/1/2 exit-code model.
@@ -54,6 +56,38 @@ pub struct Note {
     pub path_refs: Vec<PathRef>,
     /// True when the file has no frontmatter (a raw transcript).
     pub no_frontmatter: bool,
+    /// Every frontmatter key and its raw value — the schema checks need all keys (for unknown-key
+    /// detection) and the raw enum values, beyond the typed fields above.
+    pub frontmatter: BTreeMap<String, FmValue>,
+}
+
+/// A raw frontmatter value, kept generic so the schema checks see exactly what the author wrote.
+#[derive(Debug, Clone)]
+pub enum FmValue {
+    /// A scalar (string, number, bool, or empty/null), as a string.
+    Scalar(String),
+    /// A YAML list, as its string items.
+    List(Vec<String>),
+}
+
+impl FmValue {
+    /// The scalar text, or `None` for a list.
+    #[must_use]
+    pub fn as_scalar(&self) -> Option<&str> {
+        match self {
+            FmValue::Scalar(s) => Some(s),
+            FmValue::List(_) => None,
+        }
+    }
+
+    /// Whether the value is present and non-empty (a non-empty scalar or a non-empty list).
+    #[must_use]
+    pub fn is_present(&self) -> bool {
+        match self {
+            FmValue::Scalar(s) => !s.is_empty(),
+            FmValue::List(items) => !items.is_empty(),
+        }
+    }
 }
 
 /// A non-wikilink reference to a file: a markdown `[text](path)` link, or a backticked `path.md`
