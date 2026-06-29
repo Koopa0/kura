@@ -85,20 +85,22 @@ fn pack(report: &Report) -> Packed {
             .then(a.0.cmp(&b.0))
     });
 
+    // Every Info finding is "hidden"; external paths are one slice, the rest are forward-references.
+    // Deriving planned from the total (not a second rule filter) keeps planned + external == hidden,
+    // so the count line can never under-report a hidden finding (e.g. a planned Direction-A link).
+    let external = findings
+        .iter()
+        .filter(|f| f.rule_id == "link.broken.path" && f.severity == Severity::Info)
+        .count();
+    let hidden = findings.len() - errors - warns;
     Packed {
         errors,
         warns,
         scoreboard,
         leverage: leverage(findings),
         domains: domain_sections(findings),
-        planned: findings
-            .iter()
-            .filter(|f| f.rule_id == "link.broken" && f.severity == Severity::Info)
-            .count(),
-        external: findings
-            .iter()
-            .filter(|f| f.rule_id == "link.broken.path" && f.severity == Severity::Info)
-            .count(),
+        planned: hidden - external,
+        external,
     }
 }
 
@@ -237,6 +239,16 @@ pub fn human(report: &Report) -> String {
     s
 }
 
+/// Neutralize characters that would break a markdown table (`|`), HTML/`<details>` (`<`, `>`), or
+/// turn the report's own text into live wikilinks that pollute the graph (`[[`, `]]`).
+fn escape_md(s: &str) -> String {
+    s.replace('|', "\\|")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace("[[", "[\\[")
+        .replace("]]", "]\\]")
+}
+
 /// Render the packed report as a fileable markdown note body (still printed to stdout — kura never
 /// writes files). Frontmatter is deterministic (no timestamp); the consumer stamps and routes it.
 #[must_use]
@@ -258,7 +270,7 @@ pub fn markdown(report: &Report) -> String {
             "## Debt by domain\n\n| domain | error | warn |\n|---|--:|--:|"
         );
         for (domain, e, w) in &p.scoreboard {
-            let _ = writeln!(s, "| {domain} | {e} | {w} |");
+            let _ = writeln!(s, "| {} | {e} | {w} |", escape_md(domain));
         }
         s.push('\n');
     }
@@ -267,26 +279,33 @@ pub fn markdown(report: &Report) -> String {
         let _ = writeln!(s, "## Most leveraged (create one, resolve many)\n");
         for l in p.leverage.iter().take(5) {
             let tag = if l.planned { "planned" } else { "broken" };
+            // target stays in a code span (a literal `[[X]]`, not a live wikilink)
             let _ = writeln!(
                 s,
                 "- **×{}** `[[{}]]` ({tag}) — {}",
                 l.count,
                 l.target,
-                l.domains.join(", ")
+                escape_md(&l.domains.join(", "))
             );
         }
         s.push('\n');
     }
 
     for (domain, items) in &p.domains {
-        let _ = writeln!(s, "## {domain}\n");
+        let _ = writeln!(s, "## {}\n", escape_md(domain));
         for i in items {
             let n = if i.blast > 1 {
                 format!("×{} ", i.blast)
             } else {
                 String::new()
             };
-            let _ = writeln!(s, "- `{}` {n}{} — {}", i.severity, i.message, i.sample_path);
+            let _ = writeln!(
+                s,
+                "- `{}` {n}{} — {}",
+                i.severity,
+                escape_md(&i.message),
+                escape_md(&i.sample_path)
+            );
         }
         s.push('\n');
     }
@@ -302,7 +321,13 @@ pub fn markdown(report: &Report) -> String {
             .iter()
             .filter(|f| f.severity == Severity::Info)
         {
-            let _ = writeln!(s, "- `{}` {} — {}", f.rule_id, f.message, f.path);
+            let _ = writeln!(
+                s,
+                "- `{}` {} — {}",
+                f.rule_id,
+                escape_md(&f.message),
+                escape_md(&f.path)
+            );
         }
         let _ = writeln!(s, "\n</details>");
     }
@@ -356,6 +381,50 @@ mod tests {
         assert!(
             !out.contains("[[Bar]] ("),
             "single-ref target is not in the leverage callout"
+        );
+    }
+
+    #[test]
+    fn hidden_count_includes_every_info_not_just_link_broken() {
+        // a planned Direction-A link (map.disk_mismatch, Info) must be counted as hidden, not lost.
+        let report = Report {
+            findings: vec![
+                link("map.disk_mismatch", Severity::Info, "Maps/x.md", "Lesson"),
+                link(
+                    "link.broken.path",
+                    Severity::Info,
+                    "Writing/lessons/golang/a.md",
+                    "exam/x.md",
+                ),
+                link(
+                    "link.broken",
+                    Severity::Warn,
+                    "Concepts/golang/b.md",
+                    "Real",
+                ),
+            ],
+        };
+        let out = super::human(&report);
+        assert!(out.contains("2 hidden"), "{out}");
+        assert!(out.contains("1 planned forward-refs"), "{out}"); // the map.disk_mismatch info
+        assert!(out.contains("1 external paths"), "{out}");
+    }
+
+    #[test]
+    fn markdown_escapes_table_and_link_breaking_chars() {
+        let mut f = link(
+            "collision.alias",
+            Severity::Warn,
+            "Concepts/golang/a.md",
+            "x",
+        );
+        f.message = "alias has a | pipe, a <tag>, and [[Wiki]]".to_owned();
+        let md = super::markdown(&Report { findings: vec![f] });
+        assert!(!md.contains("a | pipe"), "a raw pipe breaks a table: {md}");
+        assert!(md.contains("\\|") && md.contains("&lt;tag&gt;"));
+        assert!(
+            !md.contains("[[Wiki]]"),
+            "the report must not emit a live wikilink: {md}"
         );
     }
 
