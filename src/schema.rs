@@ -45,6 +45,10 @@ pub struct Fields {
     pub known: Vec<String>,
     pub lesson_only: Vec<String>,
     pub status_group: StatusGroup,
+    /// Types for which `domain` is not required (system docs, and PARA-driven research briefs whose
+    /// classification axis is `area`, not a knowledge domain).
+    #[serde(default)]
+    pub domain_exempt_types: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -207,13 +211,14 @@ fn lint_note(note: &Note, schema: &Schema, seg: &[&str], out: &mut Vec<Finding>)
         }
     }
 
-    // Knowledge notes: full rules. inbox is undefined-shape, so it uses the lighter required set.
-    let required = if ty == Some("inbox") {
-        &schema.fields.required_inbox
-    } else {
-        &schema.fields.required
-    };
-    for key in required {
+    // Knowledge notes: full rules. inbox is undefined-shape, and the schema's domain_exempt_types
+    // (research briefs, system docs) are not classified by knowledge domain — both skip `domain`.
+    let no_domain = ty == Some("inbox")
+        || ty.is_some_and(|t| schema.fields.domain_exempt_types.iter().any(|e| e == t));
+    for key in &schema.fields.required {
+        if key == "domain" && no_domain {
+            continue;
+        }
         if !fm.get(key).is_some_and(FmValue::is_present) {
             out.push(finding(
                 note,
