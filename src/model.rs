@@ -54,6 +54,9 @@ pub struct Note {
     pub wikilinks: Vec<WikiLink>,
     /// Non-wikilink file references in the body (markdown links, backticked path tokens).
     pub path_refs: Vec<PathRef>,
+    /// Plain-text concept names this note lists under a gap heading — concepts planned but not yet
+    /// written. A `[[X]]` elsewhere whose target is one of these is a tracked forward-reference.
+    pub planned_names: Vec<String>,
     /// True when the file has no frontmatter (a raw transcript).
     pub no_frontmatter: bool,
     /// True when a `---`-fenced block is present but its YAML failed to parse. Distinguished from

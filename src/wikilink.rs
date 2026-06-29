@@ -92,6 +92,71 @@ fn is_relative_md_ref(path: &str) -> bool {
         && !path.contains('>')
 }
 
+/// Extract the planned concept names a gap section lists as plain-text list items. These are tracked
+/// forward-references, not broken links — a `[[X]]` anywhere whose target is one of these is planned,
+/// not missing. One entry may carry several names separated by `、` or ` / `, with `(...)` notes; a
+/// list item may continue on indented following lines.
+#[must_use]
+pub fn extract_planned_names(body: &str) -> Vec<String> {
+    let (code_zones, headings) = structure(body);
+    let mut names = Vec::new();
+    let mut item: Option<String> = None;
+    let mut offset = 0;
+    for raw in body.split_inclusive('\n') {
+        let line = raw.trim_end_matches(['\r', '\n']);
+        let in_gap =
+            in_gap_section(&headings, offset) && !code_zones.iter().any(|z| z.contains(&offset));
+        let trimmed = line.trim_start();
+        let is_item = ["- ", "* ", "+ "].iter().any(|m| trimmed.starts_with(m));
+        let is_continuation =
+            item.is_some() && line.starts_with([' ', '\t']) && !trimmed.is_empty() && !is_item;
+        if in_gap && is_item {
+            if let Some(prev) = item.take() {
+                push_planned_names(&prev, &mut names);
+            }
+            item = Some(trimmed[2..].trim().to_owned());
+        } else if in_gap && is_continuation {
+            if let Some(acc) = item.as_mut() {
+                acc.push(' ');
+                acc.push_str(trimmed);
+            }
+        } else if let Some(prev) = item.take() {
+            push_planned_names(&prev, &mut names);
+        }
+        offset += raw.len();
+    }
+    if let Some(prev) = item {
+        push_planned_names(&prev, &mut names);
+    }
+    names
+}
+
+/// Split one gap-list entry into concept names: drop `(...)` / `（...）` annotations, then split on
+/// the enumeration comma `、` and ` / `.
+fn push_planned_names(entry: &str, out: &mut Vec<String>) {
+    for piece in strip_parens(entry).split('、').flat_map(|p| p.split(" / ")) {
+        let name = piece.trim();
+        if !name.is_empty() {
+            out.push(name.to_owned());
+        }
+    }
+}
+
+/// Remove parenthesized annotations (ASCII and full-width) from a gap-list entry.
+fn strip_parens(s: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0usize;
+    for c in s.chars() {
+        match c {
+            '(' | '（' => depth += 1,
+            ')' | '）' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// A heading's parsed facts: start byte offset, level (used only for relative ordering), and
 /// whether its text contains a gap marker.
 struct Heading {

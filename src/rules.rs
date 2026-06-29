@@ -10,8 +10,9 @@ use crate::model::{Finding, Note, Severity, WikiLink, fingerprint};
 pub fn run(graph: &Graph) -> Vec<Finding> {
     let titles = title_index(graph);
     let slugs = slug_index(graph);
+    let planned = planned_names(graph);
     let mut findings = Vec::new();
-    link_health(graph, &titles, &mut findings);
+    link_health(graph, &titles, &planned, &mut findings);
     collision_alias(graph, &mut findings);
     provenance_unresolved(graph, &slugs, &mut findings);
     map_disk_mismatch(graph, &mut findings);
@@ -39,6 +40,19 @@ fn title_index(graph: &Graph) -> HashMap<String, Vec<String>> {
     index
 }
 
+/// Normalized set of every concept name listed under a gap heading anywhere in the corpus. A broken
+/// link to one of these is a tracked forward-reference (planned, not missing), even when the citing
+/// link itself is not under a gap heading.
+fn planned_names(graph: &Graph) -> HashSet<String> {
+    graph
+        .notes
+        .iter()
+        .flat_map(|note| note.planned_names.iter())
+        .map(|name| normalize(name))
+        .filter(|key| !key.is_empty())
+        .collect()
+}
+
 /// Lesson slug -> note path. Supersession links (`evolution_*`) reference a slug, not a filename, so
 /// they resolve here rather than through the wikilink resolver.
 fn slug_index(graph: &Graph) -> HashMap<String, String> {
@@ -55,7 +69,12 @@ fn slug_index(graph: &Graph) -> HashMap<String, String> {
 
 /// Walk every note's wikilinks, resolve each, and classify the ones that do not resolve. A resolved
 /// or ambiguous link is left to other rules.
-fn link_health(graph: &Graph, titles: &HashMap<String, Vec<String>>, out: &mut Vec<Finding>) {
+fn link_health(
+    graph: &Graph,
+    titles: &HashMap<String, Vec<String>>,
+    planned: &HashSet<String>,
+    out: &mut Vec<Finding>,
+) {
     for note in &graph.notes {
         // A study-path's links are its course list; map.disk_mismatch owns them (gate-worthy), so
         // they are not double-reported as advisory link.broken here.
@@ -69,7 +88,7 @@ fn link_health(graph: &Graph, titles: &HashMap<String, Vec<String>>, out: &mut V
             if let Some(target_notes) = titles.get(&normalize(&link.target)) {
                 out.push(title_not_alias(note, link, target_notes));
             } else {
-                out.push(broken(note, link));
+                out.push(broken(note, link, planned));
             }
         }
     }
@@ -98,10 +117,11 @@ fn title_not_alias(source: &Note, link: &WikiLink, target_notes: &[String]) -> F
     }
 }
 
-/// A link that resolves to nothing. `Info` when it sits under a planned-gap heading (a tracked
-/// forward-reference), otherwise `Warn`.
-fn broken(source: &Note, link: &WikiLink) -> Finding {
-    let planned = link.under_gap_heading;
+/// A link that resolves to nothing. `Info` when it is a tracked forward-reference — either it sits
+/// under a planned-gap heading, or its target is a concept some gap ledger lists as planned —
+/// otherwise `Warn`.
+fn broken(source: &Note, link: &WikiLink, planned_names: &HashSet<String>) -> Finding {
+    let planned = link.under_gap_heading || planned_names.contains(&normalize(&link.target));
     Finding {
         rule_id: "link.broken".to_owned(),
         severity: if planned {
@@ -114,7 +134,8 @@ fn broken(source: &Note, link: &WikiLink) -> Finding {
         field: None,
         message: format!("[[{}]] resolves to no note", link.target),
         evidence: if planned {
-            "under a gap/backlog heading; a tracked forward-reference".to_owned()
+            "a tracked forward-reference (under a gap heading or listed as a planned concept)"
+                .to_owned()
         } else {
             "no filename or alias matches the target".to_owned()
         },
@@ -285,7 +306,11 @@ fn map_disk_mismatch(graph: &Graph, out: &mut Vec<Finding>) {
             continue;
         };
         for lesson in lessons_by_domain.get(domain).into_iter().flatten() {
-            if !listed.contains(lesson.path.as_str()) {
+            // A draft or declared curriculum-gap lesson is expected work-in-progress, not a
+            // mismatch, so it is not reported at all (per the schema's lifecycle).
+            let expected = lesson.status.as_deref() == Some("draft")
+                || lesson.source_kind.as_deref() == Some("curriculum-gap");
+            if !listed.contains(lesson.path.as_str()) && !expected {
                 out.push(disk_unlisted(syllabus, lesson));
             }
         }
@@ -322,18 +347,12 @@ fn syllabus_lists_missing(syllabus: &Note, link: &WikiLink) -> Finding {
 }
 
 /// Direction B (`map.disk_unlisted`, advisory — never gates, since writing a lesson before adding it
-/// to the syllabus is normal): a lesson on disk that the syllabus for its domain does not list.
-/// `Info` when the lesson is a draft or a declared curriculum gap, otherwise `Warn`.
+/// to the syllabus is normal): a non-draft, non-gap lesson on disk that the syllabus for its domain
+/// does not list. Draft and curriculum-gap lessons are filtered out by the caller (not reported).
 fn disk_unlisted(syllabus: &Note, lesson: &Note) -> Finding {
-    let expected = lesson.status.as_deref() == Some("draft")
-        || lesson.source_kind.as_deref() == Some("curriculum-gap");
     Finding {
         rule_id: "map.disk_unlisted".to_owned(),
-        severity: if expected {
-            Severity::Info
-        } else {
-            Severity::Warn
-        },
+        severity: Severity::Warn,
         path: lesson.path.clone(),
         line: None,
         field: None,
@@ -341,11 +360,7 @@ fn disk_unlisted(syllabus: &Note, lesson: &Note) -> Finding {
             "lesson is on disk but not listed in syllabus {}",
             syllabus.path
         ),
-        evidence: if expected {
-            "a draft or declared curriculum-gap lesson not yet added to the syllabus".to_owned()
-        } else {
-            "the lesson exists but the study-path for its domain does not list it".to_owned()
-        },
+        evidence: "the lesson exists but the study-path for its domain does not list it".to_owned(),
         suggested_action: "add the lesson to the syllabus, or confirm it is intentionally excluded"
             .to_owned(),
         source_rule: "vault-schema.toml#rules".to_owned(),
@@ -406,6 +421,25 @@ mod tests {
         let by_target = |t: &str| f.iter().find(|x| x.target.as_deref() == Some(t)).unwrap();
         assert_eq!(by_target("Ghost").severity, crate::Severity::Warn);
         assert_eq!(by_target("Planned Note").severity, crate::Severity::Info);
+    }
+
+    #[test]
+    fn broken_link_to_a_planned_concept_is_info() {
+        let g = graph(&[
+            // a gap ledger listing planned concepts as plain text (annotation + `、` separated)
+            (
+                "Maps/x.md",
+                "## 缺口清單(待寫)\n\n- Foo Concept(被引 3 次)、Bar Idea\n",
+            ),
+            // links a planned concept (NOT under a gap heading here) plus a genuinely missing one
+            ("note.md", "see [[Foo Concept]] and [[Totally Missing]]\n"),
+        ]);
+        let f = of_rule(&g, "link.broken");
+        let by = |t: &str| f.iter().find(|x| x.target.as_deref() == Some(t)).unwrap();
+        // target is listed as planned in the ledger -> downgraded to Info even outside a gap section
+        assert_eq!(by("Foo Concept").severity, crate::Severity::Info);
+        // not planned, not under a gap heading -> a real broken link
+        assert_eq!(by("Totally Missing").severity, crate::Severity::Warn);
     }
 
     #[test]
@@ -472,9 +506,8 @@ mod tests {
         // Direction B: Lesson B on disk (growing), not listed -> Warn (advisory rule)
         let b = find(&dir_b, "Writing/lessons/golang/Lesson B.md").unwrap();
         assert_eq!(b.severity, crate::Severity::Warn);
-        // Direction B: Lesson C is draft, not listed -> Info (expected WIP)
-        let c = find(&dir_b, "Writing/lessons/golang/Lesson C.md").unwrap();
-        assert_eq!(c.severity, crate::Severity::Info);
+        // Direction B: Lesson C is a draft -> expected work-in-progress, not reported at all
+        assert!(find(&dir_b, "Writing/lessons/golang/Lesson C.md").is_none());
         // Lesson A is listed -> no finding in either direction
         assert!(find(&dir_a, "Writing/lessons/golang/Lesson A.md").is_none());
         assert!(find(&dir_b, "Writing/lessons/golang/Lesson A.md").is_none());
