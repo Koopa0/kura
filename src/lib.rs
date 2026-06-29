@@ -108,11 +108,15 @@ impl Report {
 ///
 /// # Errors
 /// Returns [`Error`] if walking or reading a file fails.
-pub fn check(root: &std::path::Path, paths: &[String]) -> Result<Report> {
+pub fn check(root: &std::path::Path, paths: &[String], all: bool) -> Result<Report> {
     let walk = vault::load(root)?;
     let graph = Graph::build(walk.notes, &walk.resources);
     let mut findings = rules::run(&graph);
-    // Path arguments only filter which findings are printed; the graph is always whole-tree.
+    // The graph is always built whole-tree; these only filter which findings are printed.
+    if !all {
+        // Default scope skips System/: those files cite reports and specs, not live links.
+        findings.retain(|f| !f.path.starts_with("System/"));
+    }
     if !paths.is_empty() {
         let wanted: Vec<String> = paths.iter().map(|p| p.replace('\\', "/")).collect();
         findings.retain(|f| {

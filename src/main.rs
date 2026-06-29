@@ -75,8 +75,7 @@ fn run() -> anyhow::Result<ExitCode> {
 
     match cli.command {
         Command::Check { paths, all, deny } => {
-            let _ = all; // scope policy (default excludes System/) not wired yet
-            let report = kura::check(&root, &paths).context("check")?;
+            let report = kura::check(&root, &paths, all).context("check")?;
             match output_format(cli.format) {
                 // json: pure JSONL on stdout. human: the summary on stdout.
                 Format::Json => print!("{}", report.to_jsonl().context("serialize findings")?),
