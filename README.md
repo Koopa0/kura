@@ -59,13 +59,21 @@ who reads the summary.
 ## Usage
 
 ```bash
-kura check [PATH...] [--all] [--format json|human] [--deny <rule>] [--root <dir>]
-kura coverage [--format json|human]
+kura check [PATH...] [--all] [--format json|human] [--deny <rule>] [--baseline <prev.jsonl>] [--root <dir>]
+kura coverage [--format json|human] [--root <dir>]
+kura exists <name> [--format json|human] [--root <dir>]
 ```
 
 `check` always builds the link graph from the entire `--root` tree; path arguments only filter which
 findings are printed. Output is pure JSONL on stdout in json mode (everything else on stderr) so it
-pipes cleanly. Exit codes: `0` clean, `1` gate-hit, `2` tool-error.
+pipes cleanly. `--deny <rule>` (repeatable) fails the run when a finding for that rule exists;
+`--baseline` reads a prior run's JSONL and reports/gates only on findings this run newly introduced.
+Exit codes: `0` clean, `1` gate-hit, `2` tool-error.
+
+`coverage` classifies each concept as mounted (on a map), pending-mount (in the corpus but not yet
+mapped), or orphan (nothing links it). `exists` answers whether a note for a name already exists —
+by filename, title, alias, or English title — exiting `0` if it does and `1` if not, for a dedup
+check before writing.
 
 ## Build
 
@@ -78,9 +86,11 @@ cargo fmt --check
 
 ## Status
 
-The parser, link graph, and Obsidian-faithful resolver are in place, with conformance tests over real
-cases. Link-health, alias-collision, and provenance checks emit findings as JSONL today. Map-vs-disk
-checks, delta gating against a baseline, and `coverage` are in progress.
+The full v1 surface is in place, with conformance tests over real cases: the Obsidian-faithful
+resolver; the five checks (`link.title_not_alias`, `link.broken`, `collision.alias`,
+`provenance.unresolved`, `map.disk_mismatch`); the JSONL output contract with stable fingerprints,
+deterministic ordering, scope, and delta gating; and the `coverage` and `exists` commands. Absorbing
+the per-file frontmatter linter, supersession tracking, and an MCP server are future work.
 
 ## License
 
