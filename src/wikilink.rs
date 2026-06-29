@@ -104,8 +104,8 @@ pub fn extract_planned_names(body: &str) -> Vec<String> {
     let mut offset = 0;
     for raw in body.split_inclusive('\n') {
         let line = raw.trim_end_matches(['\r', '\n']);
-        let in_gap =
-            in_gap_section(&headings, offset) && !code_zones.iter().any(|z| z.contains(&offset));
+        let in_code = code_zones.iter().any(|z| z.contains(&offset));
+        let in_gap = in_gap_section(&headings, offset) && !in_code;
         let trimmed = line.trim_start();
         let is_item = ["- ", "* ", "+ "].iter().any(|m| trimmed.starts_with(m));
         let is_continuation =
@@ -123,6 +123,15 @@ pub fn extract_planned_names(body: &str) -> Vec<String> {
         } else if let Some(prev) = item.take() {
             push_planned_names(&prev, &mut names);
         }
+        // Inline forward-reference markers (anywhere, not only gap sections): a `[[X]]` beside one
+        // is a planned concept, so its target joins the planned set.
+        if !in_code && INLINE_PLANNED_MARKERS.iter().any(|m| line.contains(m)) {
+            for (_, inner) in raw_wikilinks(line) {
+                if let Some(target) = strip_target(inner) {
+                    names.push(target);
+                }
+            }
+        }
         offset += raw.len();
     }
     if let Some(prev) = item {
@@ -130,6 +139,9 @@ pub fn extract_planned_names(body: &str) -> Vec<String> {
     }
     names
 }
+
+/// Inline markers (not headings) whose line's `[[X]]` links are planned forward-references.
+const INLINE_PLANNED_MARKERS: [&str; 3] = ["待整理", "待建", "下一課"];
 
 /// Split one gap-list entry into concept names: drop `(...)` / `（...）` annotations, then split on
 /// the enumeration comma `、` and ` / `.

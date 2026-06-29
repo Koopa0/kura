@@ -443,6 +443,30 @@ mod tests {
     }
 
     #[test]
+    fn broken_link_beside_an_inline_planned_marker_is_info() {
+        let g = graph(&[
+            // an inline "下一課:" marker beside a link makes its target a planned forward-reference
+            ("lesson.md", "本課完。下一課:[[Next Concept]]\n"),
+            // so a broken link to the same target elsewhere is info too, not a real bug
+            (
+                "other.md",
+                "see [[Next Concept]] and [[Genuinely Missing]]\n",
+            ),
+        ]);
+        let f = of_rule(&g, "link.broken");
+        assert!(
+            f.iter()
+                .filter(|x| x.target.as_deref() == Some("Next Concept"))
+                .all(|x| x.severity == crate::Severity::Info)
+        );
+        let missing = f
+            .iter()
+            .find(|x| x.target.as_deref() == Some("Genuinely Missing"))
+            .unwrap();
+        assert_eq!(missing.severity, crate::Severity::Warn);
+    }
+
+    #[test]
     fn shared_alias_across_notes_is_one_collision() {
         let g = graph(&[
             ("a.md", "---\naliases:\n  - Mechanical Sympathy\n---\n"),
