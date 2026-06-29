@@ -35,6 +35,8 @@ pub struct Note {
     pub note_type: Option<String>,
     pub domain: Option<String>,
     pub status: Option<String>,
+    /// `source_kind` frontmatter (e.g. `curriculum-gap` marks a planned, not-yet-written lesson).
+    pub source_kind: Option<String>,
     pub topics: Vec<String>,
     pub slug: Option<String>,
     /// Raw values of the provenance / relation fields (not yet resolved).

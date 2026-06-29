@@ -19,6 +19,7 @@ impl Note {
             note_type: None,
             domain: None,
             status: None,
+            source_kind: None,
             topics: Vec::new(),
             slug: None,
             based_on: Vec::new(),
@@ -36,6 +37,7 @@ impl Note {
                     note.note_type = str_field(doc, "type");
                     note.domain = str_field(doc, "domain");
                     note.status = str_field(doc, "status");
+                    note.source_kind = str_field(doc, "source_kind");
                     note.topics = list_field(doc, "topics");
                     note.slug = str_field(doc, "slug");
                     note.based_on = list_field(doc, "based_on");
