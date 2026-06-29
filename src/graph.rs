@@ -19,7 +19,7 @@ pub fn normalize(name: &str) -> String {
 }
 
 /// Outcome of resolving one wikilink target.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resolution<'a> {
     /// Resolved to exactly one file (its vault-relative path).
     One(&'a str),
@@ -36,21 +36,26 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    /// Build from notes plus non-md resources. Keys: each note's filename stem and every alias
-    /// (title excluded); each resource's full filename including extension. Obsidian requires the
-    /// extension to link a non-md file, so a resource is indexed by full filename only, never its
-    /// stem — faithful to Obsidian and free of phantom ambiguity.
+    /// Build from notes plus non-md resources. A note is keyed by every name Obsidian resolves it by
+    /// (filename and vault-relative path, each with and without `.md`) plus its aliases; the title is
+    /// excluded. A resource is keyed by its filename and path, both keeping the extension (Obsidian
+    /// needs the extension to link a non-note file). Extra keys only ever add resolutions, never
+    /// remove one, so they keep the false-negative bias.
     #[must_use]
     pub fn build(notes: &[Note], resources: &[String]) -> Self {
         let mut names: HashMap<String, Vec<String>> = HashMap::new();
         for note in notes {
-            add(&mut names, filename_stem(&note.path), &note.path);
+            for key in note_keys(&note.path) {
+                add(&mut names, key, &note.path);
+            }
             for alias in &note.aliases {
                 add(&mut names, alias, &note.path);
             }
         }
         for resource in resources {
-            add(&mut names, filename(resource), resource);
+            for key in resource_keys(resource) {
+                add(&mut names, key, resource);
+            }
         }
         for members in names.values_mut() {
             members.sort();
@@ -97,15 +102,32 @@ fn add(names: &mut HashMap<String, Vec<String>>, key: &str, path: &str) {
     }
 }
 
-/// Full filename including extension — the resolution key for a non-md linkable file.
+/// The names Obsidian resolves a markdown note by: filename and vault-relative path, each with and
+/// without the `.md` extension. Duplicates (a note at the vault root) collapse when inserted.
+fn note_keys(path: &str) -> [&str; 4] {
+    [filename_stem(path), filename(path), path_stem(path), path]
+}
+
+/// The names Obsidian resolves a non-markdown file by: filename and vault-relative path, both keeping
+/// the extension.
+fn resource_keys(path: &str) -> [&str; 2] {
+    [filename(path), path]
+}
+
+/// Full filename including extension.
 fn filename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// Filename without directory or `.md` — the resolution key for a markdown note.
+/// Filename without directory or `.md`.
 fn filename_stem(path: &str) -> &str {
     let f = filename(path);
     f.strip_suffix(".md").unwrap_or(f)
+}
+
+/// Vault-relative path without the `.md` extension.
+fn path_stem(path: &str) -> &str {
+    path.strip_suffix(".md").unwrap_or(path)
 }
 
 #[cfg(test)]

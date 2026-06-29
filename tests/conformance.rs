@@ -117,6 +117,97 @@ fn non_md_resource_resolves_by_full_filename() {
 }
 
 #[test]
+fn path_qualified_link_resolves() {
+    // Obsidian resolves [[folder/Note]] (and with .md) to that file; the resolver must too, or it
+    // would falsely report a live path-qualified link broken.
+    let g = build_graph(&[
+        ("Concepts/golang/Go Slice.md", "body"),
+        (
+            "note.md",
+            "[[Concepts/golang/Go Slice]] and [[Concepts/golang/Go Slice.md]]\n",
+        ),
+    ]);
+    let p = "Concepts/golang/Go Slice.md";
+    assert_eq!(
+        g.symbols.resolve("Concepts/golang/Go Slice"),
+        Resolution::One(p)
+    );
+    assert_eq!(
+        g.symbols.resolve("Concepts/golang/Go Slice.md"),
+        Resolution::One(p)
+    );
+    assert_eq!(g.symbols.resolve("Go Slice"), Resolution::One(p)); // bare name still works
+}
+
+#[test]
+fn md_extension_link_resolves() {
+    let g = build_graph(&[("Go Slice.md", "body")]);
+    assert_eq!(
+        g.symbols.resolve("Go Slice.md"),
+        Resolution::One("Go Slice.md")
+    );
+    assert_eq!(
+        g.symbols.resolve("Go Slice"),
+        Resolution::One("Go Slice.md")
+    );
+}
+
+#[test]
+fn escaped_table_pipe_link_resolves() {
+    // In a table cell Obsidian escapes the display pipe as `\|`; the target before it must resolve.
+    let g = build_graph(&[
+        ("Go Slice.md", "body"),
+        ("t.md", "| h |\n| - |\n| [[Go Slice\\|see]] |\n"),
+    ]);
+    let note = g.notes.iter().find(|n| n.path == "t.md").unwrap();
+    assert_eq!(note.wikilinks.len(), 1);
+    assert_eq!(note.wikilinks[0].target, "Go Slice");
+    assert_eq!(
+        g.symbols.resolve("Go Slice"),
+        Resolution::One("Go Slice.md")
+    );
+}
+
+#[test]
+fn jsonl_output_is_a_pure_contract() {
+    let g = build_graph(&[
+        (
+            "Concepts/golang/Go Slice.md",
+            "---\ntitle: \"Go Slice 內部結構\"\n---\nbody\n",
+        ),
+        ("note.md", "[[Go Slice 內部結構]] and [[Ghost]]\n"),
+    ]);
+    let mut report = kura::Report {
+        findings: kura::rules::run(&g),
+    };
+    report.sort();
+    let jsonl = report.to_jsonl().unwrap();
+    assert!(!jsonl.is_empty());
+    for line in jsonl.lines() {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        for key in [
+            "rule_id",
+            "severity",
+            "path",
+            "message",
+            "evidence",
+            "suggested_action",
+            "source_rule",
+            "fingerprint",
+        ] {
+            assert!(v.get(key).is_some(), "missing {key} in: {line}");
+        }
+        let sev = v["severity"].as_str().unwrap();
+        assert!(
+            ["info", "warn", "error"].contains(&sev),
+            "bad severity: {sev}"
+        );
+    }
+    // Deterministic: re-rendering the same report is byte-identical.
+    assert_eq!(jsonl, report.to_jsonl().unwrap());
+}
+
+#[test]
 fn wikilinks_in_code_are_skipped() {
     let body = "text [[Real]]\n```\n[[InCodeBlock]]\n```\ninline `[[InCodeSpan]]`\n";
     let note = Note::from_markdown("n.md", body);
@@ -172,5 +263,28 @@ fn vault_load_separates_notes_from_resources() -> Result<(), Box<dyn std::error:
     assert_eq!(walk.notes[0].path, "Concepts/golang/Go Slice.md");
     assert!(walk.resources.iter().any(|r| r == "Diagrams/x.canvas"));
     assert!(walk.resources.iter().any(|r| r == "README.txt"));
+    Ok(())
+}
+
+#[test]
+fn collision_with_a_non_system_member_survives_default_scope()
+-> Result<(), Box<dyn std::error::Error>> {
+    // A collision between a System/ note and a knowledge note must not be dropped by the default
+    // (System-excluded) scope just because its citing path sorts to the System/ member.
+    let dir = std::env::temp_dir().join(format!("kura-scope-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("System"))?;
+    std::fs::create_dir_all(dir.join("Writing"))?;
+    let fm = "---\naliases:\n  - Shared\n---\n";
+    std::fs::write(dir.join("System/A.md"), fm)?; // "System" sorts before "Writing"
+    std::fs::write(dir.join("Writing/B.md"), fm)?;
+    let report = kura::check(&dir, &[], false)?; // default scope excludes System/
+    std::fs::remove_dir_all(&dir)?;
+    let collisions = report
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "collision.alias")
+        .count();
+    assert_eq!(collisions, 1, "kept because Writing/B.md is in scope");
     Ok(())
 }

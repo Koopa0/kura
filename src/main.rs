@@ -70,13 +70,17 @@ fn main() -> ExitCode {
 }
 
 fn run() -> anyhow::Result<ExitCode> {
-    let cli = Cli::parse();
-    let root = cli
-        .root
-        .clone()
-        .unwrap_or(std::env::current_dir().context("get cwd")?);
+    let Cli {
+        command,
+        root,
+        format,
+    } = Cli::parse();
+    let root = match root {
+        Some(root) => root,
+        None => std::env::current_dir().context("get cwd")?,
+    };
 
-    match cli.command {
+    match command {
         Command::Check {
             paths,
             all,
@@ -96,7 +100,7 @@ fn run() -> anyhow::Result<ExitCode> {
                     .with_context(|| format!("read baseline {}", path.display()))?;
                 report.retain_new(&kura::parse_baseline(&jsonl));
             }
-            match output_format(cli.format) {
+            match output_format(format) {
                 // json: pure JSONL on stdout. human: the summary on stdout.
                 Format::Json => print!("{}", report.to_jsonl().context("serialize findings")?),
                 Format::Human => print!("{}", report.summary()),

@@ -47,7 +47,7 @@ pub fn parse_baseline(jsonl: &str) -> std::collections::HashSet<String> {
 pub enum Error {
     #[error("failed to read vault: {0}")]
     Walk(String),
-    #[error("failed to load schema {path}: {source}")]
+    #[error("failed to load schema {path}")]
     Schema {
         path: String,
         #[source]
@@ -90,10 +90,14 @@ impl Report {
         self.findings.retain(|f| !baseline.contains(&f.fingerprint));
     }
 
-    /// Whether any finding's rule is in the `deny` set (per-rule gating).
+    /// Whether any finding gates: its rule is denied and its severity is at least `Warn`. Info-level
+    /// findings (a tracked forward-reference under a gap heading) never gate, even when their rule is
+    /// denied.
     #[must_use]
     pub fn gated(&self, deny: &[String]) -> bool {
-        self.findings.iter().any(|f| deny.contains(&f.rule_id))
+        self.findings
+            .iter()
+            .any(|f| f.severity >= Severity::Warn && deny.contains(&f.rule_id))
     }
 
     /// Render findings as JSONL (one JSON object per line) — pure data for stdout in json mode.
@@ -129,7 +133,7 @@ impl Report {
         {
             let _ = writeln!(
                 s,
-                "  [{:?}] {}:{} {}",
+                "  [{}] {}:{} {}",
                 f.severity,
                 f.path,
                 f.line.unwrap_or(0),
@@ -148,22 +152,34 @@ pub fn check(root: &std::path::Path, paths: &[String], all: bool) -> Result<Repo
     let walk = vault::load(root)?;
     let graph = Graph::build(walk.notes, &walk.resources);
     let mut findings = rules::run(&graph);
-    // The graph is always built whole-tree; these only filter which findings are printed.
+    // The graph is always built whole-tree; these only filter which findings are printed. A finding
+    // is kept if any path it touches (its citing path or any collision member) is in scope.
     if !all {
         // Default scope skips System/: those files cite reports and specs, not live links.
-        findings.retain(|f| !f.path.starts_with("System/"));
+        findings.retain(|f| touched_paths(f).any(|p| !p.starts_with("System/")));
     }
     if !paths.is_empty() {
-        let wanted: Vec<String> = paths.iter().map(|p| p.replace('\\', "/")).collect();
+        let prefixes: Vec<String> = paths
+            .iter()
+            .map(|p| p.replace('\\', "/").trim_end_matches('/').to_owned())
+            .collect();
         findings.retain(|f| {
-            wanted
-                .iter()
-                .any(|w| f.path == *w || f.path.starts_with(&format!("{w}/")))
+            touched_paths(f).any(|p| {
+                prefixes.iter().any(|w| {
+                    let w = w.as_str();
+                    p == w || p.strip_prefix(w).is_some_and(|rest| rest.starts_with('/'))
+                })
+            })
         });
     }
     let mut report = Report { findings };
     report.sort();
     Ok(report)
+}
+
+/// Every path a finding touches: its citing path plus any collision members.
+fn touched_paths(f: &Finding) -> impl Iterator<Item = &str> {
+    std::iter::once(f.path.as_str()).chain(f.collision_members.iter().map(String::as_str))
 }
 
 #[cfg(test)]
@@ -221,5 +237,16 @@ mod tests {
         assert!(report.gated(&["link.broken".to_owned()]));
         assert!(!report.gated(&["collision.alias".to_owned()]));
         assert!(!report.gated(&[]));
+    }
+
+    #[test]
+    fn info_finding_never_gates() {
+        let mut info = finding("link.broken", "a.md", "X");
+        info.severity = Severity::Info;
+        let report = Report {
+            findings: vec![info],
+        };
+        // a tracked forward-reference (Info) must not gate even when its rule is denied
+        assert!(!report.gated(&["link.broken".to_owned()]));
     }
 }

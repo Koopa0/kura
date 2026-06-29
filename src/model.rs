@@ -15,6 +15,16 @@ pub enum Severity {
     Error,
 }
 
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Severity::Info => "info",
+            Severity::Warn => "warn",
+            Severity::Error => "error",
+        })
+    }
+}
+
 /// A corpus node (one note). The symbol table and link graph are built on these.
 #[derive(Debug, Clone)]
 pub struct Note {
@@ -90,9 +100,11 @@ impl Finding {
     }
 }
 
-/// Stable fingerprint for a finding: FNV-1a over (rule_id, path, target), hex-encoded. Deterministic
-/// across runs and machines (unlike `DefaultHasher`) and not tied to line numbers, so a consumer can
-/// set-diff two stateless scans to find a branch's delta.
+/// Stable fingerprint for a finding: FNV-1a over (rule_id, path, target), hex-encoded. The path is
+/// the note's already-normalized vault-relative path; the target is the rule's structured key as
+/// given (a link target, an alias, or a provenance value). Deterministic across runs and machines
+/// (unlike `DefaultHasher`) and not tied to line numbers, so a consumer can set-diff two stateless
+/// scans to find a branch's delta.
 #[must_use]
 pub fn fingerprint(rule_id: &str, path: &str, target: &str) -> String {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;

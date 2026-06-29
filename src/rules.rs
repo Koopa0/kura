@@ -204,20 +204,21 @@ fn provenance_unresolved(graph: &Graph, slugs: &HashMap<String, String>, out: &m
 }
 
 /// Whether a provenance value resolves either as a wikilink (filename/alias) or as a lesson slug.
+/// The value may be a bare slug or a `[[wikilink]]` with `|display` / `#heading` / `^block`, which
+/// are stripped the same way a body link is.
 fn provenance_resolves(graph: &Graph, slugs: &HashMap<String, String>, value: &str) -> bool {
     let v = value.trim();
-    let target = v
+    let inner = v
         .strip_prefix("[[")
         .and_then(|s| s.strip_suffix("]]"))
-        .unwrap_or(v)
-        .trim();
-    if target.is_empty() {
-        return true; // nothing to resolve; do not invent a finding
-    }
-    if !matches!(graph.symbols.resolve(target), Resolution::Unresolved) {
+        .unwrap_or(v);
+    let Some(target) = crate::wikilink::strip_target(inner) else {
+        return true; // nothing to resolve (a bare anchor); do not invent a finding
+    };
+    if !matches!(graph.symbols.resolve(&target), Resolution::Unresolved) {
         return true;
     }
-    slugs.contains_key(target) || slugs.contains_key(&normalize(target))
+    slugs.contains_key(target.as_str()) || slugs.contains_key(&normalize(&target))
 }
 
 fn provenance(note: &Note, field: &str, value: &str) -> Finding {
@@ -318,5 +319,15 @@ mod tests {
         assert!(targets.contains(&"[[Ghost]]")); // wikilink that resolves to nothing
         assert!(targets.contains(&"ghost-slug")); // slug that resolves to nothing
         assert!(!targets.iter().any(|t| t.contains("DDIA"))); // resolves -> no finding
+    }
+
+    #[test]
+    fn provenance_reference_with_display_resolves() {
+        // a based_on value carrying |display must be stripped like a body link before resolving
+        let g = graph(&[
+            ("DDIA.md", "body"),
+            ("c.md", "---\nbased_on:\n  - \"[[DDIA|See DDIA]]\"\n---\n"),
+        ]);
+        assert!(of_rule(&g, "provenance.unresolved").is_empty());
     }
 }

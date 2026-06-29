@@ -1,8 +1,9 @@
 //! Walk the vault tree: markdown files become notes, other linkable files become resources.
 //!
 //! The link graph is always built from the whole `--root` tree; path arguments only filter
-//! findings, never the graph. Walking uses `ignore`: it honors `.gitignore` and skips hidden
-//! entries (`.obsidian/`, `.git/`).
+//! findings, never the graph. The walk skips hidden entries (`.obsidian/`, `.git/`, `.trash/`) but
+//! does NOT honor `.gitignore` — Obsidian ignores git, so a gitignored attachment is still a live
+//! link target and must be in the index, or a link to it would be falsely reported broken.
 
 use std::path::Path;
 
@@ -30,7 +31,14 @@ pub struct Walk {
 /// Returns [`Error`] if walking fails or a file cannot be read (bad root / non-UTF-8).
 pub fn load(root: &Path) -> Result<Walk> {
     let mut walk = Walk::default();
-    for entry in WalkBuilder::new(root).build() {
+    let walker = WalkBuilder::new(root)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .ignore(false)
+        .parents(false)
+        .build();
+    for entry in walker {
         let entry = entry.map_err(|e| Error::Walk(e.to_string()))?;
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;

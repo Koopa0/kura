@@ -21,7 +21,8 @@ const GAP_MARKERS: [&str; 5] = ["缺口", "待補", "待寫", "待整理", "待�
 #[must_use]
 pub fn extract(body: &str, body_start_line: usize) -> Vec<WikiLink> {
     let (mut skip_zones, headings) = structure(body);
-    skip_zones.extend(comment_zones(body));
+    let comments = comment_zones(body, &skip_zones);
+    skip_zones.extend(comments);
     let mut links = Vec::new();
     for (offset, inner) in raw_wikilinks(body) {
         if skip_zones.iter().any(|z| z.contains(&offset)) {
@@ -82,15 +83,16 @@ fn structure(body: &str) -> (Vec<Range<usize>>, Vec<Heading>) {
     (code_zones, headings)
 }
 
-/// Byte ranges of Obsidian `%%...%%` comments (inline and multi-line). Each pair of `%%` delimits
-/// one comment; an unpaired trailing `%%` is ignored.
-fn comment_zones(body: &str) -> Vec<Range<usize>> {
-    let mut zones = Vec::new();
-    let mut marks = body.match_indices("%%");
-    while let (Some((open, _)), Some((close, _))) = (marks.next(), marks.next()) {
-        zones.push(open..close + 2);
-    }
-    zones
+/// Byte ranges of Obsidian `%%...%%` comments (inline and multi-line). `%%` inside code is ignored
+/// first (a stray `%%` in a code sample must not shift the pairing of real comments); the remaining
+/// `%%` are paired in order and an unpaired trailing one is dropped.
+fn comment_zones(body: &str, code_zones: &[Range<usize>]) -> Vec<Range<usize>> {
+    let marks: Vec<usize> = body
+        .match_indices("%%")
+        .map(|(i, _)| i)
+        .filter(|i| !code_zones.iter().any(|z| z.contains(i)))
+        .collect();
+    marks.chunks_exact(2).map(|p| p[0]..p[1] + 2).collect()
 }
 
 /// Raw scan for `[[...]]` pairs: `(byte offset of the [[, inner text)`. The inner text must not
@@ -114,9 +116,15 @@ fn raw_wikilinks(body: &str) -> Vec<(usize, &str)> {
 }
 
 /// Strip `|display`, `#heading`, `^block` from a wikilink's inner text, leaving the note-name
-/// target. `None` if nothing remains (a same-file anchor link).
-fn strip_target(inner: &str) -> Option<String> {
-    let before_display = inner.split('|').next().unwrap_or(inner);
+/// target. `None` if nothing remains (a same-file anchor link). Shared with provenance resolution so
+/// frontmatter references are stripped identically to body links.
+pub(crate) fn strip_target(inner: &str) -> Option<String> {
+    // A wikilink in a table cell escapes the display pipe as `\|`; drop the trailing escape backslash.
+    let before_display = inner
+        .split('|')
+        .next()
+        .unwrap_or(inner)
+        .trim_end_matches('\\');
     let before_heading = before_display.split('#').next().unwrap_or(before_display);
     let target = before_heading
         .split('^')
@@ -146,6 +154,9 @@ fn in_gap_section(headings: &[Heading], offset: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // unwrap on a known-present fixture is the assertion itself.
+    #![allow(clippy::unwrap_used)]
+
     use super::{comment_zones, raw_wikilinks, strip_target};
 
     #[test]
@@ -154,6 +165,8 @@ mod tests {
         assert_eq!(strip_target("X#Heading").as_deref(), Some("X"));
         assert_eq!(strip_target("X^block").as_deref(), Some("X"));
         assert_eq!(strip_target("X#H|disp").as_deref(), Some("X"));
+        // A table cell escapes the display pipe as `\|`.
+        assert_eq!(strip_target("X\\|disp").as_deref(), Some("X"));
     }
 
     #[test]
@@ -170,9 +183,21 @@ mod tests {
 
     #[test]
     fn comment_zones_pair_double_percent() {
-        let zones = comment_zones("a %%c%% b");
+        let zones = comment_zones("a %%c%% b", &[]);
         assert_eq!(zones.len(), 1);
         assert_eq!(zones[0], 2..7);
-        assert!(comment_zones("none here").is_empty());
+        assert!(comment_zones("none here", &[]).is_empty());
+    }
+
+    #[test]
+    fn double_percent_inside_code_does_not_shift_pairing() {
+        // A stray `%%` inside a code zone must be ignored so it cannot mis-pair a real comment.
+        let body = "x %% y %%[[Real]]%%";
+        // mark the first `%%` as inside a code zone
+        let code: Vec<std::ops::Range<usize>> = std::iter::once(2usize..4).collect();
+        let zones = comment_zones(body, &code);
+        assert_eq!(zones.len(), 1);
+        // the surviving pair wraps the real comment, not the stray
+        assert!(zones[0].contains(&body.find("[[Real]]").unwrap()));
     }
 }
